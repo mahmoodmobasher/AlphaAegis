@@ -35,6 +35,8 @@ import {
 import Navbar from "../../components/Navigation/Navbar";
 import { useStrategyStore } from "../../store/useStrategyStore";
 import { portfolioApi, ibApi, riskApi, agentsApi } from "../../services/api";
+import { usePortfolioStore } from "../../store/usePortfolioStore";
+import ShockSliders, { HistoricalPresets } from "../../components/InteractiveGraph/ShockSliders";
 
 
 interface LegCalc {
@@ -227,10 +229,150 @@ export default function PortfolioPage() {
   const [showCustomJsonInput, setShowCustomJsonInput] = useState(false);
   const [customJsonActive, setCustomJsonActive] = useState(false);
   const [riskTab, setRiskTab] = useState<"factors" | "beta_delta" | "stress" | "committee">("factors");
-  const [spotShock, setSpotShock] = useState(0.0);
-  const [ivShock, setIvShock] = useState(0.0);
-  const [debouncedSpotShock, setDebouncedSpotShock] = useState(0.0);
-  const [debouncedIvShock, setDebouncedIvShock] = useState(0.0);
+
+  // Zustand Store selectors
+  const activePositions = usePortfolioStore((state) => state.activePositions);
+  const spotPrice = usePortfolioStore((state) => state.spotPrice);
+  const volatility = usePortfolioStore((state) => state.volatility);
+  const setSpotPrice = usePortfolioStore((state) => state.setSpotPrice);
+  const setVolatility = usePortfolioStore((state) => state.setVolatility);
+
+  // Mapped shocks for derived compatibility
+  const spotShock = ((spotPrice - 180) / 180) * 100;
+  const ivShock = ((volatility - 0.28) / 0.28) * 100;
+  const debouncedSpotShock = spotShock;
+  const debouncedIvShock = ivShock;
+
+  // Reset shocks when view mode changes
+  useEffect(() => {
+    setSpotPrice(180.00);
+    setVolatility(0.28);
+  }, [viewMode, setSpotPrice, setVolatility]);
+
+  // WebSocket event-driven communication
+  useEffect(() => {
+    if (!store.token || !store.isAuthenticated) return;
+    
+    // Connect to WebSocket gateway
+    const ws = new WebSocket("ws://localhost:8000/ws/portfolio-analytics");
+    
+    ws.onopen = () => {
+      console.log("WebSocket connected to portfolio-analytics");
+      sendWebSocketPayload();
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          console.error("WebSocket calculation error:", data.error);
+          setRiskError(data.error);
+        } else {
+          setRiskData(data);
+          setRiskError(null);
+          if (data.greeks_commentary) {
+            usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
+          }
+        }
+      } catch (err) {
+        console.error("Error parsing WebSocket JSON frame:", err);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
+    };
+
+    const sendWebSocketPayload = () => {
+      if (ws.readyState === WebSocket.OPEN) {
+        const spotShockPct = ((spotPrice - 180) / 180) * 100;
+        const ivShockPct = ((volatility - 0.28) / 0.28) * 100;
+
+        let payload: any;
+        if (customJsonActive) {
+          try {
+            payload = JSON.parse(customJson);
+            payload.shock_scenario = {
+              spot_shock_pct: spotShockPct,
+              iv_shock_pct: ivShockPct
+            };
+          } catch (e) {
+            console.error("Failed to parse custom JSON sandbox input for WebSocket", e);
+            return;
+          }
+        } else {
+          const activeData = viewMode === "local" ? portfolioData : ibPortfolioData;
+          if (!activeData || !activeData.positions || activeData.positions.length === 0) {
+            return;
+          }
+
+          const positions = activeData.positions.map((pos: any) => {
+            const isOptionCombo = pos.legs && pos.legs.length > 0;
+            if (isOptionCombo) {
+              return {
+                ticker: pos.underlying_symbol || pos.symbol,
+                type: "OPTION_COMBINATION",
+                strategy_name: pos.strategy || pos.name,
+                size: pos.quantity || 1,
+                underlying_beta_to_spx: pos.underlying_symbol === "TQQQ" ? 3.02 : (pos.underlying_symbol === "NVDA" ? 1.85 : 1.0),
+                legs: pos.legs.map((leg: any) => {
+                  const oType = (leg.option_type || "CALL").toUpperCase();
+                  const action = (leg.action || "BUY").toUpperCase();
+                  const pType = action === "BUY" ? "LONG" : "SHORT";
+                  let deltaVal = leg.greeks?.delta !== undefined ? leg.greeks.delta : 0.50;
+                  return {
+                    strike: leg.strike_price,
+                    type: oType,
+                    expiration: leg.expiration_date || "2026-06-05",
+                    position_type: pType,
+                    delta: deltaVal,
+                    premium: leg.entry_premium || leg.premium || 2.50
+                  };
+                })
+              };
+            } else {
+              const sharesQty = pos.legs && pos.legs.length > 0 ? pos.legs[0].quantity : pos.quantity;
+              const avgCost = pos.legs && pos.legs.length > 0 ? pos.legs[0].entry_premium : pos.entry_price;
+              return {
+                ticker: pos.underlying_symbol || pos.symbol,
+                type: "EQUITY",
+                size: sharesQty || 1,
+                avg_price: avgCost || 100.0,
+                current_price: pos.underlying_price || 100.0,
+                underlying_beta_to_spx: pos.underlying_symbol === "NVDA" ? 1.85 : (pos.underlying_symbol === "MSFT" ? 1.25 : 1.0)
+              };
+            }
+          });
+
+          const summary = {
+            net_liquidity: activeData.summary?.net_liquidation || activeData.summary?.total_current_value || 5000.0,
+            excess_liquidity: activeData.summary?.buying_power || 3000.0,
+            maintenance_margin: activeData.summary?.maint_margin_req || 3000.0,
+            daily_pnl: activeData.summary?.total_pnl || 0.0
+          };
+
+          payload = {
+            portfolio_summary: summary,
+            positions: positions,
+            shock_scenario: {
+              spot_shock_pct: spotShockPct,
+              iv_shock_pct: ivShockPct
+            }
+          };
+        }
+
+        ws.send(JSON.stringify(payload));
+      }
+    };
+
+    const timer = setTimeout(() => {
+      sendWebSocketPayload();
+    }, 150);
+
+    return () => {
+      clearTimeout(timer);
+      ws.close();
+  }, [activePositions, spotPrice, volatility, portfolioData, ibPortfolioData, viewMode, store.isAuthenticated, customJsonActive, customJson]);
 
   // AI Committee & Command Bar States
   const [commandQuery, setCommandQuery] = useState("");
@@ -248,23 +390,6 @@ export default function PortfolioPage() {
   const [initialRiskSnapshot, setInitialRiskSnapshot] = useState<any>(null);
   const [stagedRecommendationId, setStagedRecommendationId] = useState<string | null>(null);
   const [orderExecutedMessage, setOrderExecutedMessage] = useState<string | null>(null);
-
-  // Reset shocks when view mode changes
-  useEffect(() => {
-    setSpotShock(0.0);
-    setIvShock(0.0);
-    setDebouncedSpotShock(0.0);
-    setDebouncedIvShock(0.0);
-  }, [viewMode]);
-
-  // Debounce Spot and IV shocks by 150ms
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedSpotShock(spotShock);
-      setDebouncedIvShock(ivShock);
-    }, 150);
-    return () => clearTimeout(handler);
-  }, [spotShock, ivShock]);
 
   const getRiskPositionInfo = (ticker: string, strategyName?: string) => {
     if (!riskData || !riskData.positions) return null;
@@ -929,6 +1054,22 @@ export default function PortfolioPage() {
       // 1. Fetch Portfolio
       const portData = await portfolioApi.getPortfolio(store.token);
       setPortfolioData(portData);
+
+      // Sync local positions to usePortfolioStore
+      if (portData && portData.positions) {
+        const mappedPositions = portData.positions.flatMap((pos: any) => 
+          (pos.legs || []).map((leg: any) => ({
+            id: String(leg.id),
+            symbol: pos.underlying_symbol || pos.symbol || "",
+            strike: leg.strike_price,
+            expiration: leg.expiration_date,
+            type: leg.option_type as "CALL" | "PUT",
+            quantity: leg.quantity,
+            action: leg.action as "BUY" | "SELL"
+          }))
+        );
+        usePortfolioStore.getState().setActivePositions(mappedPositions);
+      }
       
       // 2. Fetch Watchlist
       const wlData = await portfolioApi.getWatchlist(store.token);
@@ -953,6 +1094,22 @@ export default function PortfolioPage() {
     try {
       const res = await ibApi.getIbPortfolio(configId, store.token);
       setIbPortfolioData(res);
+
+      // Sync IB positions to usePortfolioStore
+      if (res && res.positions) {
+        const mappedPositions = res.positions.flatMap((pos: any) => 
+          (pos.legs || []).map((leg: any) => ({
+            id: String(leg.id || Math.random().toString()),
+            symbol: pos.underlying_symbol || pos.symbol || "",
+            strike: leg.strike_price,
+            expiration: leg.expiration_date,
+            type: leg.option_type as "CALL" | "PUT",
+            quantity: leg.quantity,
+            action: leg.action as "BUY" | "SELL"
+          }))
+        );
+        usePortfolioStore.getState().setActivePositions(mappedPositions);
+      }
     } catch (err: any) {
       console.error("Failed to load IB portfolio data", err);
       setIbError(err.message || "Failed to load live Interactive Brokers data. Please check if TWS or IB Gateway is running locally on the configured port.");
@@ -3007,107 +3164,11 @@ export default function PortfolioPage() {
                                   </span>
                                 </div>
 
-                                {/* Preset templates */}
-                                <div className="flex flex-wrap gap-2 items-center">
-                                  <span className="text-[10px] text-text-muted font-bold mr-1">Historical Presets:</span>
-                                  <button
-                                    onClick={() => { setSpotShock(-10.0); setIvShock(30.0); }}
-                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition ${
-                                      spotShock === -10.0 && ivShock === 30.0
-                                        ? "bg-indigo-600 text-white border-indigo-500 shadow"
-                                        : "bg-slate-900 border-slate-800 text-text-sub hover:text-text-main"
-                                    }`}
-                                  >
-                                    Tech Correction (-10% Spot, +30% IV)
-                                  </button>
-                                  <button
-                                    onClick={() => { setSpotShock(-2.0); setIvShock(50.0); }}
-                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition ${
-                                      spotShock === -2.0 && ivShock === 50.0
-                                        ? "bg-indigo-600 text-white border-indigo-500 shadow"
-                                        : "bg-slate-900 border-slate-800 text-text-sub hover:text-text-main"
-                                    }`}
-                                  >
-                                    Vol Spike (-2% Spot, +50% IV)
-                                  </button>
-                                  <button
-                                    onClick={() => { setSpotShock(-20.0); setIvShock(100.0); }}
-                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition ${
-                                      spotShock === -20.0 && ivShock === 100.0
-                                        ? "bg-indigo-600 text-white border-indigo-500 shadow"
-                                        : "bg-slate-900 border-slate-800 text-text-sub hover:text-text-main"
-                                    }`}
-                                  >
-                                    Black Monday (-20% Spot, +100% IV)
-                                  </button>
-                                  <button
-                                    onClick={() => { setSpotShock(5.0); setIvShock(-15.0); }}
-                                    className={`px-2.5 py-1 text-[10px] font-bold rounded-lg border transition ${
-                                      spotShock === 5.0 && ivShock === -15.0
-                                        ? "bg-indigo-600 text-white border-indigo-500 shadow"
-                                        : "bg-slate-900 border-slate-800 text-text-sub hover:text-text-main"
-                                    }`}
-                                  >
-                                    Market Recovery (+5% Spot, -15% IV)
-                                  </button>
-                                  {(spotShock !== 0.0 || ivShock !== 0.0) && (
-                                    <button
-                                      onClick={() => { setSpotShock(0.0); setIvShock(0.0); }}
-                                      className="px-2.5 py-1 text-[10px] font-bold rounded-lg border bg-rose-950/30 border-rose-900 text-rose-400 hover:bg-rose-950/60 transition"
-                                    >
-                                      Reset Shocks
-                                    </button>
-                                  )}
-                                </div>
+                                {/* Decoupled Preset templates */}
+                                <HistoricalPresets />
 
-                                {/* Sliders */}
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-                                  <div className="space-y-2">
-                                    <div className="flex justify-between text-[11px] font-bold">
-                                      <span className="text-white">Underlying Spot Price Shock</span>
-                                      <span className={`font-mono ${spotShock > 0 ? "text-emerald-400" : spotShock < 0 ? "text-rose-400" : "text-text-muted"}`}>
-                                        {spotShock > 0 ? "+" : ""}{spotShock.toFixed(1)}%
-                                      </span>
-                                    </div>
-                                    <input
-                                      type="range"
-                                      min="-30"
-                                      max="30"
-                                      step="1"
-                                      value={spotShock}
-                                      onChange={(e) => setSpotShock(parseFloat(e.target.value))}
-                                      className="w-full h-1.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none border border-slate-800"
-                                    />
-                                    <div className="flex justify-between text-[9px] text-text-muted font-medium">
-                                      <span>-30% Shock</span>
-                                      <span>Base Case (0%)</span>
-                                      <span>+30% Shock</span>
-                                    </div>
-                                  </div>
-
-                                  <div className="space-y-2">
-                                    <div className="flex justify-between text-[11px] font-bold">
-                                      <span className="text-white">Implied Volatility (IV) Shock</span>
-                                      <span className={`font-mono ${ivShock > 0 ? "text-indigo-400" : ivShock < 0 ? "text-amber-500" : "text-text-muted"}`}>
-                                        {ivShock > 0 ? "+" : ""}{ivShock.toFixed(1)}%
-                                      </span>
-                                    </div>
-                                    <input
-                                      type="range"
-                                      min="-50"
-                                      max="150"
-                                      step="5"
-                                      value={ivShock}
-                                      onChange={(e) => setIvShock(parseFloat(e.target.value))}
-                                      className="w-full h-1.5 bg-slate-900 rounded-lg appearance-none cursor-pointer accent-indigo-500 focus:outline-none border border-slate-800"
-                                    />
-                                    <div className="flex justify-between text-[9px] text-text-muted font-medium">
-                                      <span>-50% IV Vol</span>
-                                      <span>Base Case (0%)</span>
-                                      <span>+150% Vol Spike</span>
-                                    </div>
-                                  </div>
-                                </div>
+                                {/* Decoupled Sliders */}
+                                <ShockSliders />
                               </div>
 
                               {/* Pro-Forma Shock Results */}
