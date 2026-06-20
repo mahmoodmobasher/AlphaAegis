@@ -89,8 +89,6 @@ export default function Navbar() {
             >
               Flow <ChevronDown className="h-3 w-3" />
             </button>
-            <a href="#" className="hover:text-white transition">Tutorials</a>
-            <a href="#" className="hover:text-white transition">Blog</a>
           </div>
 
           {/* Right Section: Auth States */}
