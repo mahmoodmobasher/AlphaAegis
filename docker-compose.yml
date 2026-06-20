@@ -8,15 +8,15 @@ services:
       - "6379:6379"
     restart: always
 
-  ib-gateway:
+  alphaaegis-ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway:latest
     container_name: alphaaegis-ib-gateway
     ports:
       - "4002:4002"
-      - "8888:8888"
+      - "5900:5900"
     environment:
-      - TWS_USERID=your_tws_userid_here
-      - TWS_PASSWORD=your_tws_password_here
+      - TWS_USERID=""
+      - TWS_PASSWORD=""
       - TRADING_MODE=paper
       - AUTO_ACCEPT_INCOMING=yes
     restart: always
@@ -29,13 +29,13 @@ services:
     environment:
       - REDIS_URL=redis://redis:6379
       - DATABASE_URL=sqlite:///dev.db
-      - IB_HOST=ib-gateway
+      - IB_HOST=alphaaegis-ib-gateway
       - IB_PORT=4002
     ports:
       - "8000:8000"
     depends_on:
       - redis
-      - ib-gateway
+      - alphaaegis-ib-gateway
     restart: always
 
   frontend:
