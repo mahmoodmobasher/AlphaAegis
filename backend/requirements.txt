@@ -14,4 +14,4 @@ requests>=2.32.0
 email-validator>=2.2.0
 yfinance>=0.2.38
 pandas>=2.2.0
-ibapi-official>=10.19.1
+https://github.com/InteractiveBrokers/tws-api/archive/refs/heads/master.tar.gz#subdirectory=source/pythonclient
