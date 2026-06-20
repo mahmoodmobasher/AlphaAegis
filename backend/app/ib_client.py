@@ -2,6 +2,7 @@
 AlphaAegis backend module for Interactive Brokers client. Provides async wrapper for IB API.
 """
 import asyncio
+import os
 import threading
 from ibapi.wrapper import EWrapper
 from ibapi.client import EClient
@@ -335,8 +336,35 @@ from typing import Optional
 _global_ib_client: Optional[IBClient] = None
 _global_ib_lock = asyncio.Lock()
 
-async def get_global_ib_client(host: str, port: int, client_id: int) -> IBClient:
+async def get_global_ib_client(host: str = None, port: int = None, client_id: int = None) -> IBClient:
     global _global_ib_client
+    
+    # Ingest parameters with fallback chain:
+    # 1. Environment variable if set (e.g. IB_HOST)
+    # 2. Argument if provided (e.g. host)
+    # 3. Default fallback value ("127.0.0.1", 4002, 1)
+    
+    env_host = os.getenv("IB_HOST")
+    final_host = env_host if env_host is not None else (host if host is not None else "127.0.0.1")
+    
+    env_port = os.getenv("IB_PORT")
+    if env_port is not None:
+        try:
+            final_port = int(env_port)
+        except ValueError:
+            final_port = port if port is not None else 4002
+    else:
+        final_port = port if port is not None else 4002
+        
+    env_client_id = os.getenv("IB_CLIENT_ID")
+    if env_client_id is not None:
+        try:
+            final_client_id = int(env_client_id)
+        except ValueError:
+            final_client_id = client_id if client_id is not None else 1
+    else:
+        final_client_id = client_id if client_id is not None else 1
+
     async with _global_ib_lock:
         if _global_ib_client is None or not _global_ib_client.isConnected():
             if _global_ib_client is not None:
@@ -344,9 +372,9 @@ async def get_global_ib_client(host: str, port: int, client_id: int) -> IBClient
                     await _global_ib_client.disconnect_async()
                 except Exception:
                     pass
-            print(f"[IB CONFIG] Creating new persistent IB connection to {host}:{port} with client_id={client_id}...")
+            print(f"[IB CONFIG] Creating new persistent IB connection to {final_host}:{final_port} with client_id={final_client_id}...")
             client = IBClient()
-            await client.connect_async(host, port, client_id)
+            await client.connect_async(final_host, final_port, final_client_id)
             _global_ib_client = client
             # Allow the connection and data farms to warm up
             await asyncio.sleep(2.0)
