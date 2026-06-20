@@ -1,0 +1,90 @@
+@import "tailwindcss";
+@source "./page.tsx";
+@source "./build/page.tsx";
+@source "./optimize/page.tsx";
+@source "./flow/page.tsx";
+@source "./chain/page.tsx";
+@source "./portfolio/page.tsx";
+@source "./layout.tsx";
+@source "../components/StrategyBuilder/LegBuilder.tsx";
+@source "../components/InteractiveGraph/PnLChart.tsx";
+@source "../components/InteractiveGraph/PnLTable.tsx";
+@source "../components/Auth/AuthModal.tsx";
+@source "../components/Navigation/BuildDropdown.tsx";
+@source "../components/Navigation/Navbar.tsx";
+
+:root {
+  --background: #080c14;
+  --foreground: #f8fafc;
+  --panel-bg: #0f1524;
+  --panel-border: #1e293b;
+  
+  --primary-green: #00df89;
+  --primary-red: #ff3a60;
+  
+  --text-primary: #f8fafc;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+}
+
+@theme {
+  --color-bg-main: var(--background);
+  --color-bg-panel: var(--panel-bg);
+  --color-border-panel: var(--panel-border);
+  
+  --color-bullish: var(--primary-green);
+  --color-bearish: var(--primary-red);
+  
+  --color-text-main: var(--text-primary);
+  --color-text-sub: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+
+  --grid-template-columns-19: repeat(19, minmax(0, 1fr));
+}
+
+body {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-geist-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow-x: hidden;
+}
+
+/* Custom styles for option chains and sliders */
+input[type="range"] {
+  accent-color: var(--primary-green);
+}
+
+/* Custom scrollbars for options list */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* Glassmorphism utility classes */
+.glass-panel {
+  background: rgba(17, 24, 39, 0.7);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+/* Neon glow animations */
+.glow-green {
+  box-shadow: 0 0 15px rgba(16, 185, 129, 0.15);
+}
+
+.glow-red {
+  box-shadow: 0 0 15px rgba(239, 68, 68, 0.15);
+}

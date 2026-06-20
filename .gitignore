@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+.next/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Local Environment Variables & Secrets
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*
+
+# Databases and logs
+*.db
+*.log
+dev.db
+test.db
+optionflow.db
+alphaaegis.db
+test_ib_portfolio.db
+
+# Caching & IDEs
+.pytest_cache/
+.eslintcache
+.DS_Store
+.idea/
+.vscode/
+
+# Temporary directories
+tmp/
+dist/
+build/
