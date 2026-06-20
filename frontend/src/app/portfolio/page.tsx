@@ -229,6 +229,8 @@ export default function PortfolioPage() {
   const [showCustomJsonInput, setShowCustomJsonInput] = useState(false);
   const [customJsonActive, setCustomJsonActive] = useState(false);
   const [riskTab, setRiskTab] = useState<"factors" | "beta_delta" | "stress" | "committee">("factors");
+  const [macroHeadline, setMacroHeadline] = useState<string | null>(null);
+  const [macroSentimentScore, setMacroSentimentScore] = useState<number | null>(null);
 
   // Zustand Store selectors
   const activePositions = usePortfolioStore((state) => state.activePositions);
@@ -236,6 +238,8 @@ export default function PortfolioPage() {
   const volatility = usePortfolioStore((state) => state.volatility);
   const setSpotPrice = usePortfolioStore((state) => state.setSpotPrice);
   const setVolatility = usePortfolioStore((state) => state.setVolatility);
+  const aiCommentary = usePortfolioStore((state) => state.aiCommentary);
+  const setAiCommentary = usePortfolioStore((state) => state.setAiCommentary);
 
   // Mapped shocks for derived compatibility
   const spotShock = ((spotPrice - 180) / 180) * 100;
@@ -270,6 +274,26 @@ export default function PortfolioPage() {
         } else {
           setRiskData(data);
           setRiskError(null);
+          
+          if (data.debate_logs) {
+            setDebateLogs(data.debate_logs);
+          }
+          if (data.advisory_report) {
+            setAdvisoryReport(data.advisory_report);
+          }
+          if (data.summary_report) {
+            setSummaryReport(data.summary_report);
+          }
+          if (data.recommendations) {
+            setRecommendations(data.recommendations);
+          }
+          if (data.macro_headline) {
+            setMacroHeadline(data.macro_headline);
+          }
+          if (data.macro_sentiment_score !== undefined) {
+            setMacroSentimentScore(data.macro_sentiment_score);
+          }
+          
           if (data.greeks_commentary) {
             usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
           }
@@ -372,6 +396,7 @@ export default function PortfolioPage() {
     return () => {
       clearTimeout(timer);
       ws.close();
+    };
   }, [activePositions, spotPrice, volatility, portfolioData, ibPortfolioData, viewMode, store.isAuthenticated, customJsonActive, customJson]);
 
   // AI Committee & Command Bar States
@@ -1655,7 +1680,7 @@ export default function PortfolioPage() {
                           <div className="bg-bg-panel border border-border-panel p-4 rounded-2xl shadow-lg">
                             <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Net Liquidation</span>
                             <p className="text-xl font-extrabold text-white mt-1 font-mono">
-                              ${portfolioData.summary.net_liquidation.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              ${(riskData?.portfolio_summary?.net_liquidity ?? portfolioData.summary.net_liquidation).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </p>
                           </div>
                           <div className="bg-bg-panel border border-border-panel p-4 rounded-2xl shadow-lg">
@@ -1667,13 +1692,13 @@ export default function PortfolioPage() {
                           <div className="bg-bg-panel border border-border-panel p-4 rounded-2xl shadow-lg">
                             <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Buying Power</span>
                             <p className="text-xl font-extrabold text-white mt-1 font-mono">
-                              ${portfolioData.summary.buying_power?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "$0.00"}
+                              ${(riskData?.portfolio_summary?.excess_liquidity ?? portfolioData.summary.buying_power)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "$0.00"}
                             </p>
                           </div>
                           <div className="bg-bg-panel border border-border-panel p-4 rounded-2xl shadow-lg">
                             <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Maint Margin Req</span>
                             <p className="text-xl font-extrabold text-white mt-1 font-mono">
-                              ${portfolioData.summary.maint_margin_req?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "$0.00"}
+                              ${(riskData?.portfolio_summary?.maintenance_margin ?? portfolioData.summary.maint_margin_req)?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || "$0.00"}
                             </p>
                           </div>
                         </>
@@ -1762,14 +1787,14 @@ export default function PortfolioPage() {
                   )}
 
                   {/* AI Risk & Performance Commentary Panel */}
-                  {riskData && riskData.greeks_commentary && (
+                  {aiCommentary && (
                     <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl shadow-md space-y-3">
                       <h3 className="text-xs font-bold text-text-main flex items-center gap-1.5 border-b border-slate-900 pb-2">
                         <Sparkles className="h-4 w-4 text-indigo-400" />
                         AI Risk & Performance Commentary
                       </h3>
                       <div className="text-text-sub text-xs leading-relaxed max-h-[300px] overflow-y-auto pr-1">
-                        {riskData.greeks_commentary.split("\n").map((line: string, idx: number) => {
+                        {aiCommentary.split("\n").map((line: string, idx: number) => {
                           if (line.startsWith("# ")) {
                             return <h2 key={idx} className="text-sm font-extrabold text-white mt-4 border-b border-slate-900 pb-1">{line.replace("# ", "")}</h2>;
                           } else if (line.startsWith("## ")) {
@@ -2172,6 +2197,9 @@ export default function PortfolioPage() {
                           <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Net Liquidation</span>
                           <p className="text-xl font-extrabold text-white mt-1 font-mono">
                             {(() => {
+                              if (riskData?.portfolio_summary?.net_liquidity !== undefined) {
+                                return `$${riskData.portfolio_summary.net_liquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                              }
                               if (!ibPortfolioData?.summary?.NetLiquidation) return "$0.00";
                               const val = parseFloat(ibPortfolioData.summary.NetLiquidation.value);
                               return isNaN(val) ? ibPortfolioData.summary.NetLiquidation.value : `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2194,6 +2222,9 @@ export default function PortfolioPage() {
                           <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Buying Power</span>
                           <p className="text-xl font-extrabold text-white mt-1 font-mono">
                             {(() => {
+                              if (riskData?.portfolio_summary?.excess_liquidity !== undefined) {
+                                return `$${riskData.portfolio_summary.excess_liquidity.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                              }
                               if (!ibPortfolioData?.summary?.BuyingPower) return "$0.00";
                               const val = parseFloat(ibPortfolioData.summary.BuyingPower.value);
                               return isNaN(val) ? ibPortfolioData.summary.BuyingPower.value : `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -2205,6 +2236,9 @@ export default function PortfolioPage() {
                           <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">Maint Margin Req</span>
                           <p className="text-xl font-extrabold text-white mt-1 font-mono">
                             {(() => {
+                              if (riskData?.portfolio_summary?.maintenance_margin !== undefined) {
+                                return `$${riskData.portfolio_summary.maintenance_margin.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+                              }
                               if (!ibPortfolioData?.summary?.MaintMarginReq) return "$0.00";
                               const val = parseFloat(ibPortfolioData.summary.MaintMarginReq.value);
                               return isNaN(val) ? ibPortfolioData.summary.MaintMarginReq.value : `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -3449,8 +3483,40 @@ export default function PortfolioPage() {
                                     Retry Convening Committee
                                   </button>
                                 </div>
-                              ) : (
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                ) : (
+                                  <div className="space-y-6">
+                                    {/* Live Macro News Feed Banner */}
+                                    {macroHeadline && (
+                                      <div className="glass-panel p-4 rounded-2xl shadow-xl flex flex-col md:flex-row md:items-center justify-between gap-4 animate-fade-in border-l-4 border-rose-500/80">
+                                        <div className="flex items-center gap-3">
+                                          <div className="relative flex h-2.5 w-2.5">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
+                                            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                                          </div>
+                                          <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest flex items-center">
+                                            LIVE MACRO FEED
+                                          </span>
+                                          <div className="h-4 w-[1px] bg-slate-800 hidden md:block" />
+                                          <span className="text-xs font-semibold text-white tracking-wide">{macroHeadline}</span>
+                                        </div>
+                                        {macroSentimentScore !== null && (
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-bold text-text-muted uppercase tracking-wider">SENTIMENT</span>
+                                            <span className={`text-[10px] font-extrabold px-2.5 py-0.5 rounded-full border ${
+                                              macroSentimentScore > 0.2 
+                                                ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                                                : macroSentimentScore < -0.2
+                                                  ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                                                  : "text-slate-400 bg-slate-500/10 border-slate-500/20"
+                                            }`}>
+                                              {macroSentimentScore > 0 ? "+" : ""}{macroSentimentScore.toFixed(2)}
+                                            </span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                   {/* Debate Chat Feed Column */}
                                   <div className="flex flex-col gap-6">
                                     <div className="space-y-4 bg-slate-950 border border-slate-900 p-5 rounded-2xl shadow-xl flex flex-col h-[500px]">
@@ -3553,7 +3619,8 @@ export default function PortfolioPage() {
                                     </div>
                                   </div>
                                 </div>
-                              )}
+                              </div>
+                            )}
 
                               {/* Actionable Recommendations list at bottom of committee tab */}
                               {!debateLoading && recommendations.length > 0 && (

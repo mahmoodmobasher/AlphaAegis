@@ -8,7 +8,7 @@
 
 ### Architectural Topology & Data Flow Pipeline
 1. **Frontend Input Layer ([page.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/app/portfolio/page.tsx))**: Collects active positions, user portfolio selections (Local Saved Portfolio vs. Live Sessions), and macroeconomic stress testing inputs.
-2. **API Communication Tier**: Dispatches structured POST configurations to our backend services.
+2. **Event-Driven WebSocket Gateway & Redis Pub/Sub**: Connects the client's Zustand store ([usePortfolioStore.ts](file:///Users/moemahmood/builder_code/myoption/frontend/src/store/usePortfolioStore.ts)) over a persistent WebSocket `/ws/portfolio-analytics`. Sliders or ingestion worker events trigger automated backend re-evaluations.
 3. **Backend Quantitative Engine ([risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py))**: 
    - Ingests position arrays.
    - Computes historical drift, equity lookback parameters ($\mu$), and VaR metrics.
@@ -46,7 +46,10 @@ Directly integrated into the portfolio dashboard, this engine provides automated
   * **Strategy Summary:** Confirms if the portfolio is successfully capturing premium via short options (e.g., active TQQQ spreads) while maintaining controlled directional exposure.
 * This logic is defined in [generate_greeks_commentary](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py#L716-L791) in [risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py).
 
-### 4. Multi-Agent AI Investment Committee Room
+### 4. Multi-Agent AI Investment Committee Room & Real-Time Macro Sentiment Feed
+* **Live Event-Driven Stream Ingestion:** Periodically generates mock financial news headlines and streams text payloads via [macro_stream.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/macro_stream.py) directly into a Redis Pub/Sub backplane channel named `macro:feed:raw`.
+* **Dynamic AI Investment Committee Feeds:** Highlights how the LangGraph multi-agent committee—consisting of a **Macro Risk Agent** (interprets macro headline sentiment and defines IV/spot shocks), an **Options Specialist Agent** (triggers the CRR Binomial Lattice engine in [pricing.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/pricing.py) to re-price active options), and a **Portfolio Manager Coordinator Agent**—processes sentiment vectors and runs automated portfolio risk shocks in real-time.
+* **Glassmorphic Headline Monitor:** A frontend UI banner within the Committee Room tab that dynamically maps `macroHeadline` and `macroSentimentScore` with a flashing indicator light completely driven by async WebSocket broadcast frames.
 * **LangGraph Debate Orchestration:** Simulates a dialectical debate twice daily (or on-demand) between an **Options Specialist Agent**, a **Macro Risk Agent**, and a **Portfolio Manager Coordinator Agent** (implemented in [agents.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/agents.py)).
 * **Advisory Report:** Output includes detailed logs, staged compliance recommendations, and a narrative summary report displayed directly in the dashboard left drawer.
 

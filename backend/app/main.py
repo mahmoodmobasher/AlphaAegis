@@ -8,9 +8,12 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import redis.asyncio as aioredis
 
-from app.database import engine, Base
+import random
+from datetime import datetime
+from app.database import engine, Base, SessionLocal
 from app.models import User, Strategy, StrategyLeg, PortfolioPosition, PortfolioLeg, Watchlist, TradeNote # Import models to register with Base
 from app.routers import auth, strategy, chain, portfolio, ib, ib_config, risk_analytics, agents  # ib routers enabled
+from app.routers.portfolio import get_user_portfolio
 
 from app.services.risk_analytics import (
     parse_positions,
@@ -93,7 +96,7 @@ async def init_redis():
         
         # Start background listener task
         redis_pubsub = redis_client.pubsub()
-        await redis_pubsub.subscribe("portfolio:updates")
+        await redis_pubsub.subscribe("portfolio:updates", "macro:feed:raw")
         redis_listener_task = asyncio.create_task(redis_message_listener())
     except Exception as e:
         logger.warning(f"Could not connect to Redis: {e}. Falling back to in-memory broker mode.")
@@ -105,13 +108,46 @@ async def redis_message_listener():
             # listen to pubsub messages asynchronously
             message = await redis_pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if message:
-                data_str = message["data"]
+                channel = message.get("channel")
+                data_str = message.get("data")
                 try:
                     payload = json.loads(data_str)
-                    analytics_res = run_calculations(payload)
-                    await manager.broadcast(json.dumps(analytics_res))
+                    if channel == "macro:feed:raw":
+                        db = SessionLocal()
+                        try:
+                            user = db.query(User).first()
+                            if user:
+                                portfolio_state = get_user_portfolio(current_user=user, db=db)
+                            else:
+                                portfolio_state = {
+                                    "positions": [],
+                                    "summary": {
+                                        "total_entry_cost": 0.0,
+                                        "total_current_value": 0.0,
+                                        "total_pnl": 0.0,
+                                        "total_pnl_percent": 0.0,
+                                        "net_liquidation": 5000.0,
+                                        "total_cash_value": 5000.0,
+                                        "buying_power": 5000.0,
+                                        "maint_margin_req": 0.0,
+                                        "greeks": {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0, "rho": 0.0}
+                                    },
+                                    "sector_exposure": []
+                                }
+                        except Exception as ex:
+                            logger.error(f"Error querying DB for macro feed: {ex}")
+                            portfolio_state = {"positions": [], "summary": {"net_liquidation": 5000.0}}
+                        finally:
+                            db.close()
+                            
+                        from app.services.agents import run_langgraph_committee_feed
+                        analytics_res = await run_langgraph_committee_feed(portfolio_state, payload)
+                        await manager.broadcast(json.dumps(analytics_res))
+                    else:
+                        analytics_res = run_calculations(payload)
+                        await manager.broadcast(json.dumps(analytics_res))
                 except Exception as e:
-                    logger.error(f"Error processing Redis pub/sub message: {e}")
+                    logger.error(f"Error processing Redis pub/sub message on channel {channel}: {e}")
             await asyncio.sleep(0.01)
     except asyncio.CancelledError:
         logger.info("Redis listener task cancelled.")
@@ -282,19 +318,87 @@ def run_calculations(payload: dict) -> dict:
         logger.error(f"Error executing quantitative analytics in WebSocket: {e}")
         return {"error": f"Calculations failed: {str(e)}"}
 
+# Fallback Mock Macro Feed loop when Redis is offline/unavailable
+async def start_mock_macro_loop():
+    logger.info("Mock in-memory Macro stream started.")
+    try:
+        from app.services.macro_stream import HEADLINES
+        from app.services.agents import run_langgraph_committee_feed
+        while True:
+            await asyncio.sleep(30.0)
+            # Only generate events if Redis client is offline
+            if not redis_client:
+                headline_data = random.choice(HEADLINES)
+                payload = {
+                    "headline": headline_data["text"],
+                    "sentiment": headline_data["sentiment"],
+                    "iv_adj": headline_data["iv_adj"],
+                    "spot_shock": headline_data["spot_shock"],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+                
+                db = SessionLocal()
+                try:
+                    user = db.query(User).first()
+                    if user:
+                        portfolio_state = get_user_portfolio(current_user=user, db=db)
+                    else:
+                        portfolio_state = {
+                            "positions": [],
+                            "summary": {
+                                "total_entry_cost": 0.0,
+                                "total_current_value": 0.0,
+                                "total_pnl": 0.0,
+                                "total_pnl_percent": 0.0,
+                                "net_liquidation": 5000.0,
+                                "total_cash_value": 5000.0,
+                                "buying_power": 5000.0,
+                                "maint_margin_req": 0.0,
+                                "greeks": {"delta": 0.0, "gamma": 0.0, "theta": 0.0, "vega": 0.0, "rho": 0.0}
+                            },
+                            "sector_exposure": []
+                        }
+                except Exception as ex:
+                    logger.error(f"Error querying DB in mock macro stream: {ex}")
+                    portfolio_state = {"positions": [], "summary": {"net_liquidation": 5000.0}}
+                finally:
+                    db.close()
+                    
+                analytics_res = await run_langgraph_committee_feed(portfolio_state, payload)
+                await manager.broadcast(json.dumps(analytics_res))
+    except asyncio.CancelledError:
+        logger.info("Mock macro loop cancelled.")
+    except Exception as e:
+        logger.error(f"Mock macro stream error: {e}")
+
+mock_macro_task = None
+macro_worker_task = None
+
 @app.on_event("startup")
 async def startup_event():
+    global mock_macro_task, macro_worker_task
     await init_redis()
+    
+    # Start macro Ingestion stream worker
+    from app.services.macro_stream import start_macro_stream_worker
+    macro_worker_task = asyncio.create_task(start_macro_stream_worker(REDIS_URL))
+    
+    # Start mock fallback loop
+    mock_macro_task = asyncio.create_task(start_mock_macro_loop())
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    global redis_listener_task, redis_client
+    global redis_listener_task, redis_client, mock_macro_task, macro_worker_task
     if redis_listener_task:
         redis_listener_task.cancel()
         try:
             await redis_listener_task
         except asyncio.CancelledError:
             pass
+    if mock_macro_task:
+        mock_macro_task.cancel()
+    if macro_worker_task:
+        macro_worker_task.cancel()
     if redis_client:
         await redis_client.aclose()
 

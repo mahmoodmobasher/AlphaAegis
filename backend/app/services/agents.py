@@ -447,3 +447,357 @@ We recommend implementing the following staged adjustments to bring the portfoli
         "recommendations": all_recs,
         "summary_report": summary_report
     }
+
+# ----------------------------------------------------------------------
+# LANGGRAPH STATE GRAPH & AGENT NODES FOR MACRO SENTIMENT FEED
+# ----------------------------------------------------------------------
+
+from app.services.risk_analytics import (
+    parse_positions,
+    calculate_factor_exposures,
+    calculate_beta_weighted_delta,
+    calculate_value_at_risk,
+    get_spx_price,
+    calculate_shock_scenario,
+    calculate_compliance_alert,
+    calculate_daily_expected_return,
+    generate_greeks_commentary
+)
+
+class AgentState:
+    def __init__(self, portfolio_state: Dict[str, Any], macro_event: Optional[Dict[str, Any]] = None):
+        self.portfolio_state = portfolio_state
+        self.macro_event = macro_event
+        self.macro_sentiment_score = 0.0
+        self.headline = ""
+        self.volatility_adjustment = 0.0
+        self.spot_shock_pct = 0.0
+        self.risk_data = {}
+        self.debate_logs = []
+        self.advisory_report = ""
+        self.summary_report = ""
+        self.recommendations = []
+
+async def macro_risk_agent_node(state: AgentState):
+    """
+    Macro Risk Agent: Ingests raw text feed, updates sentiment, and establishes
+    localized volatility adjustment parameters (+/- IV expansion due to headline).
+    """
+    event = state.macro_event or {}
+    state.headline = event.get("headline", "No active news stream.")
+    state.macro_sentiment_score = event.get("sentiment", 0.0)
+    state.volatility_adjustment = event.get("iv_adj", 0.0)
+    state.spot_shock_pct = event.get("spot_shock", 0.0)
+    
+    sentiment_desc = "Neutral"
+    if state.macro_sentiment_score > 0.3:
+        sentiment_desc = "Bullish / Risk-On"
+    elif state.macro_sentiment_score < -0.3:
+        sentiment_desc = "Bearish / Risk-Off"
+        
+    state.debate_logs.append({
+        "agent": "Macro Risk Agent",
+        "avatar": "activity",
+        "message": f"Macro Shock Alert! Detected headline: '{state.headline}' (Sentiment: {sentiment_desc}, score: {state.macro_sentiment_score}). "
+                   f"Adjusting volatility premium parameters: Expecting a {state.volatility_adjustment:+.1f}% IV shift and a {state.spot_shock_pct:+.1f}% index spot shock."
+    })
+
+async def options_specialist_agent_node(state: AgentState):
+    """
+    Options Specialist Agent: Intercepts Macro parameters, triggers CRR Binomial Lattice engine
+    to simulate asset shock across activePositions, and updates Value-at-Risk (VaR).
+    """
+    # Trigger pricing.py calculations via execute_agent_portfolio_calculations
+    risk_results = execute_agent_portfolio_calculations(
+        state.portfolio_state,
+        state.spot_shock_pct,
+        state.volatility_adjustment
+    )
+    state.risk_data = risk_results
+    
+    sim_var = risk_results.get("value_at_risk", {}).get("var_99_pct", 0.0)
+    state.debate_logs.append({
+        "agent": "Options Specialist Agent",
+        "avatar": "shield",
+        "message": f"Processed pro-forma risk updates under macro shock. Simulated 99% portfolio VaR has adjusted to {sim_var:.2f}% of Net Liquidation. "
+                   f"Calculating American option payoff adjustments across all legs using the CRR Binomial Lattice engine."
+    })
+
+async def pm_coordinator_node(state: AgentState):
+    """
+    PM Coordinator: Bundles the risk stats, debate logs, and generates a live markdown reasoning brief.
+    """
+    summary = state.risk_data.get("portfolio_summary", {})
+    net_liq = summary.get("net_liquidity", 5000.0)
+    maint_margin = summary.get("maintenance_margin", 3000.0)
+    daily_pnl = summary.get("daily_pnl", 0.0)
+    var_99_pct = state.risk_data.get("value_at_risk", {}).get("var_99_pct", 0.0)
+    
+    state.debate_logs.append({
+        "agent": "Portfolio Manager Agent",
+        "avatar": "briefcase",
+        "message": f"Consensus reached. Macro sentiment score of {state.macro_sentiment_score:+.2f} absorbed. "
+                   f"All client-side displays are synced with the updated Greeks and risk analytics brief."
+    })
+    
+    # Stage defensive/offensive recommendation based on sentiment
+    if state.macro_sentiment_score < -0.3:
+        state.recommendations.append({
+            "id": "rec_macro_hedge",
+            "ticker": "SPY",
+            "type": "OPTION_COMBINATION",
+            "action": "HEDGE",
+            "description": f"Stage a long protective SPY Put to hedge downside from hawkish macro news: '{state.headline}'",
+            "trade_draft": {
+                "ticker": "SPY",
+                "type": "OPTION_COMBINATION",
+                "action": "BUY",
+                "size": 1,
+                "legs": [
+                    {"strike": 500.0, "type": "PUT", "expiration": "2026-07-17", "position_type": "LONG", "delta": -0.30}
+                ]
+            }
+        })
+    else:
+        state.recommendations.append({
+            "id": "rec_macro_deploy",
+            "ticker": "SPY",
+            "type": "EQUITY",
+            "action": "BUY",
+            "description": f"Deploy excess capital to capture positive sentiment from news: '{state.headline}'",
+            "trade_draft": {
+                "ticker": "SPY",
+                "type": "EQUITY",
+                "size": 5,
+                "avg_price": 540.0,
+                "current_price": 540.0
+            }
+        })
+
+    state.advisory_report = f"""# Macro Shock Committee Advisory Report
+
+## News Ingestion Brief
+* **Headline:** "{state.headline}"
+* **Sentiment Impact:** {state.macro_sentiment_score:+.2f} ({'Bearish' if state.macro_sentiment_score < -0.2 else 'Bullish' if state.macro_sentiment_score > 0.2 else 'Neutral'})
+* **Volatility Shock Adjusted:** {state.volatility_adjustment:+.1f}% IV Shift
+* **Spot Index Shock Adjusted:** {state.spot_shock_pct:+.1f}% Spot Shift
+
+## Multi-Agent Risk Assessments
+
+### 1. Macro Risk Agent
+- Flagged expectable shift in systemic volatility. Expecting localized beta shock.
+
+### 2. Options Specialist Agent
+- Re-priced option inventory using **CRR Binomial Lattice Model**.
+- Simulated Value-at-Risk (99% confidence): **{var_99_pct:.2f}%** of Net Liquidity.
+
+---
+
+### Actionable Advisory Response
+{state.recommendations[0]['description'] if state.recommendations else 'Maintain current cash deployment and options legs.'}
+"""
+
+    state.summary_report = f"""# Macro Sentiment Risk Commentary
+
+### Capital Constraints Context
+- **Headline Shock**: {state.headline}
+- **Net Liquidation (Shocked)**: ${net_liq:,.2f}
+- **Maintenance Margin (Shocked)**: ${maint_margin:,.2f}
+- **Simulated Daily P&L Shift**: ${daily_pnl:,.2f}
+
+### Systemic Volatility Assessment
+- The sentiment vector is **{state.macro_sentiment_score:+.2f}**. 
+- Simulated 99% portfolio VaR is **{var_99_pct:.2f}%** of Net Liquidation.
+- Protective adjustments are recommended to mitigate tail risks under high volatility prints.
+"""
+
+def execute_agent_portfolio_calculations(portfolio_state: dict, spot_shock_pct: float, iv_shock_pct: float) -> dict:
+    try:
+        raw_positions = []
+        for pos in portfolio_state.get("positions", []):
+            is_db_format = "underlying_symbol" in pos
+            raw_pos = {
+                "ticker": pos.get("underlying_symbol") if is_db_format else pos.get("ticker"),
+                "type": pos.get("type", "OPTION_COMBINATION" if pos.get("legs") else "EQUITY"),
+                "strategy_name": pos.get("name") if is_db_format else pos.get("strategy_name"),
+                "size": pos.get("quantity") if is_db_format else pos.get("size", 1),
+                "avg_price": pos.get("entry_price") if is_db_format else pos.get("avg_price"),
+                "current_price": pos.get("underlying_price") if is_db_format else pos.get("current_price"),
+                "underlying_beta_to_spx": pos.get("underlying_beta_to_spx", 1.0),
+                "legs": [
+                    {
+                        "strike": leg.get("strike_price") if is_db_format else leg.get("strike"),
+                        "type": (leg.get("option_type") if is_db_format else leg.get("type", "CALL")).upper(),
+                        "expiration": leg.get("expiration_date") if is_db_format else leg.get("expiration"),
+                        "position_type": ("LONG" if leg.get("action") == "BUY" else "SHORT") if is_db_format else leg.get("position_type", "SHORT"),
+                        "delta": leg.get("greeks", {}).get("delta", 0.5) if is_db_format else leg.get("delta", 0.5),
+                        "premium": leg.get("entry_premium") if is_db_format else leg.get("premium", 2.50)
+                    }
+                    for leg in pos.get("legs", [])
+                ] if pos.get("legs") else []
+            }
+            raw_positions.append(raw_pos)
+            
+        parsed_positions = parse_positions(raw_positions)
+        spx_price = get_spx_price()
+        factor_exp = calculate_factor_exposures(parsed_positions)
+        beta_weighted = calculate_beta_weighted_delta(parsed_positions, spx_price)
+        var_limits = calculate_value_at_risk(parsed_positions)
+        
+        summary = portfolio_state.get("portfolio_summary", portfolio_state.get("summary", {}))
+        net_liq = summary.get("net_liquidity", summary.get("net_liquidation", 5400.0))
+        maint_margin = summary.get("maintenance_margin", summary.get("maint_margin_req", 3000.0))
+        daily_pnl = summary.get("daily_pnl", summary.get("total_pnl", 0.0))
+        
+        compliance_status = calculate_compliance_alert(net_liq, maint_margin)
+        daily_expected = calculate_daily_expected_return(parsed_positions, net_liq)
+        
+        pro_forma_data = calculate_shock_scenario(
+            parsed_positions=parsed_positions,
+            spot_shock_pct=spot_shock_pct,
+            iv_shock_pct=iv_shock_pct,
+            initial_summary={
+                "net_liquidity": net_liq,
+                "maintenance_margin": maint_margin,
+                "daily_pnl": daily_pnl
+            }
+        )
+            
+        response_positions = []
+        for pos in parsed_positions:
+            response_positions.append({
+                "ticker": pos["ticker"],
+                "type": pos["type"],
+                "strategy_name": pos.get("strategy_name"),
+                "size": pos["size"],
+                "price": pos["price"],
+                "beta": pos["beta"],
+                "delta": pos["delta"],
+                "market_value": pos["market_value"],
+                "delta_equivalent": pos["delta_equivalent"],
+                "early_assignment_risk": pos.get("early_assignment_risk"),
+                "days_to_liquidate": pos["days_to_liquidate"],
+                "adv": pos["adv"],
+                "legs": [
+                    {
+                        "strike": leg["strike"],
+                        "type": leg["type"],
+                        "expiration": leg["expiration"],
+                        "position_type": leg["position_type"],
+                        "delta": leg["delta"],
+                        "price": leg["price"],
+                        "early_assignment_risk": leg["early_assignment_risk"]
+                    }
+                    for leg in pos.get("legs", [])
+                ]
+            })
+            
+        return {
+            "portfolio_summary": {
+                "net_liquidity": pro_forma_data["net_liquidity"] if pro_forma_data else net_liq,
+                "excess_liquidity": pro_forma_data["excess_liquidity"] if pro_forma_data else (net_liq - maint_margin),
+                "maintenance_margin": pro_forma_data["maintenance_margin"] if pro_forma_data else maint_margin,
+                "daily_pnl": pro_forma_data["daily_pnl"] if pro_forma_data else daily_pnl
+            },
+            "beta_weighted_delta": {
+                "total_beta_weighted_delta_shares": beta_weighted["total_beta_weighted_delta_shares"],
+                "total_beta_weighted_delta_dollars": beta_weighted["total_beta_weighted_delta_dollars"],
+                "spx_index_price": beta_weighted["spx_index_price"],
+                "positions": [
+                    {
+                        "ticker": p["ticker"],
+                        "strategy": p["strategy"],
+                        "position_delta": p["position_delta"],
+                        "beta": p["beta"],
+                        "beta_weighted_delta_shares": p["beta_weighted_delta_shares"],
+                        "beta_weighted_delta_dollars": p["beta_weighted_delta_dollars"],
+                        "delta_equivalent": p["delta_equivalent"]
+                    }
+                    for p in beta_weighted["positions"]
+                ]
+            },
+            "factor_exposure": {
+                "portfolio_factors": {
+                    "growth": factor_exp["portfolio_factors"]["growth"],
+                    "momentum": factor_exp["portfolio_factors"]["momentum"],
+                    "value": factor_exp["portfolio_factors"]["value"]
+                },
+                "sector_matrix": [
+                    {
+                        "sector": s["sector"],
+                        "exposure": s["exposure"],
+                        "percentage": s["percentage"]
+                    }
+                    for s in factor_exp["sector_matrix"]
+                ]
+            },
+            "value_at_risk": {
+                "var_95_dollars": var_limits["var_95_dollars"] * (1 + iv_shock_pct/100.0),
+                "var_95_pct": var_limits["var_95_pct"] * (1 + iv_shock_pct/100.0),
+                "var_99_dollars": var_limits["var_99_dollars"] * (1 + iv_shock_pct/100.0),
+                "var_99_pct": var_limits["var_99_pct"] * (1 + iv_shock_pct/100.0),
+                "lookback_days_actual": var_limits["lookback_days_actual"]
+            },
+            "compliance": {
+                "status": compliance_status["status"],
+                "ratio": compliance_status["ratio"],
+                "message": compliance_status["message"]
+            },
+            "pro_forma": {
+                "net_liquidity": pro_forma_data["net_liquidity"],
+                "maintenance_margin": pro_forma_data["maintenance_margin"],
+                "excess_liquidity": pro_forma_data["excess_liquidity"],
+                "daily_pnl": pro_forma_data["daily_pnl"],
+                "net_liquidity_change": pro_forma_data["net_liquidity_change"],
+                "positions": [
+                    {
+                        "ticker": p["ticker"],
+                        "type": p["type"],
+                        "value_initial": p["value_initial"],
+                        "value_shocked": p["value_shocked"],
+                        "value_change": p["value_change"]
+                    }
+                    for p in pro_forma_data["positions"]
+                ]
+            } if pro_forma_data else None,
+            "positions": response_positions,
+            "daily_expected_return": {
+                "daily_expected_return_usd": daily_expected["daily_expected_return_usd"],
+                "expected_return_percentage": daily_expected["expected_return_percentage"],
+                "regime_status": daily_expected["regime_status"]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Failed execute_agent_portfolio_calculations: {e}")
+        return {"error": str(e)}
+
+async def run_langgraph_committee_feed(portfolio_state: Dict[str, Any], macro_event: Dict[str, Any]) -> Dict[str, Any]:
+    state = AgentState(portfolio_state, macro_event)
+    
+    # 1. Macro Risk Agent Node
+    await macro_risk_agent_node(state)
+    
+    # 2. Options Specialist Node
+    await options_specialist_agent_node(state)
+    
+    # 3. PM Coordinator Node
+    await pm_coordinator_node(state)
+    
+    return {
+        "portfolio_summary": state.risk_data.get("portfolio_summary", {}),
+        "beta_weighted_delta": state.risk_data.get("beta_weighted_delta", {}),
+        "factor_exposure": state.risk_data.get("factor_exposure", {}),
+        "value_at_risk": state.risk_data.get("value_at_risk", {}),
+        "compliance": state.risk_data.get("compliance", {}),
+        "pro_forma": state.risk_data.get("pro_forma", {}),
+        "positions": state.risk_data.get("positions", []),
+        "daily_expected_return": state.risk_data.get("daily_expected_return", {}),
+        "debate_logs": state.debate_logs,
+        "advisory_report": state.advisory_report,
+        "summary_report": state.summary_report,
+        "recommendations": state.recommendations,
+        "greeks_commentary": state.summary_report,
+        "macro_headline": state.headline,
+        "macro_sentiment_score": state.macro_sentiment_score
+    }
+
