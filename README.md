@@ -9,8 +9,11 @@
 ### 1. Advanced Options Strategy Builder & Payoff Engine
 * **Multi-Leg Structures:** Build custom options spreads of up to 4 contract legs with dynamic adjustment of strikes, expiration dates, size (quantity), and premiums.
 * **Pre-configured Preset Spreads:** Instantly load standard strategies (e.g., Bull Call Spreads, Bear Put Spreads, Straddles, Strangles, Iron Condors).
-* **60 FPS Client-Side Engine:** Real-time Black-Scholes calculations update the payoff chart instantly as spot price and volatility sliders are adjusted.
+* **60 FPS Client-Side Reactivity Engine:** Utilizes a standard, lightweight Black-Scholes implementation ([calculateBSClient](file:///Users/moemahmood/builder_code/myoption/frontend/src/utils/pricing.ts#L33-L89)) completely in client-side TypeScript. This powers the real-time slider interpolation across [PnLChart.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/components/InteractiveGraph/PnLChart.tsx), [PnLTable.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/components/InteractiveGraph/PnLTable.tsx), and [LegBuilder.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/components/StrategyBuilder/LegBuilder.tsx) to eliminate UI latency.
+* **Institutional Backend Risk Engine:** Powered by a comprehensive Cox-Ross-Rubinstein (CRR) Binomial Lattice pricing model ([calculate_binomial_american](file:///Users/moemahmood/builder_code/myoption/backend/app/services/pricing.py#L126-L338) in [pricing.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/pricing.py)). This backend layer handles exact portfolio analytics, tracking discrete dividend schedules, calculating true early assignment risk flags, and simulating macroeconomic shocks ([risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py) lines 147–158 and 539–550).
+* **Risk-Adjusted Return Analytics:** Confirms that all Value-at-Risk (VaR) and Daily Expected Return ($\mu + \Theta$) metrics displayed on the dashboard are derived entirely from the rigorous backend Binomial Lattice framework.
 * **Payoff Trajectories:** Visualizes both the **payoff at expiration** (dashed boundary) and **simulated payoff today** (solid curve) with custom hover tooltips showing leg-by-leg P&L contributions.
+
 
 ### 2. Standalone Daily Expected Return Engine (Feature F-11)
 AlphaAegis features a dedicated service method to compute the portfolio's expected daily dollar return, combining historical underlying drift with option theta decay:
