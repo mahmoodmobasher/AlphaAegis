@@ -6,6 +6,16 @@
 
 ## 🚀 System Architecture & Key Features
 
+### Architectural Topology & Data Flow Pipeline
+1. **Frontend Input Layer ([page.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/app/portfolio/page.tsx))**: Collects active positions, user portfolio selections (Local Saved Portfolio vs. Live Sessions), and macroeconomic stress testing inputs.
+2. **API Communication Tier**: Dispatches structured POST configurations to our backend services.
+3. **Backend Quantitative Engine ([risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py))**: 
+   - Ingests position arrays.
+   - Computes historical drift, equity lookback parameters ($\mu$), and VaR metrics.
+   - Passes option variables to [pricing.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/pricing.py) to process dynamic trees via the **Cox-Ross-Rubinstein Binomial Lattice**.
+4. **AI Generation Layer**: The calculated data structures are routed through our LangGraph Multi-Agent Committee Room routing loop in [agents.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/agents.py), producing textual market commentary and coordinated action logs before returning a uniform JSON frame back to the frontend dashboard.
+
+
 ### 1. Advanced Options Strategy Builder & Payoff Engine
 * **Multi-Leg Structures:** Build custom options spreads of up to 4 contract legs with dynamic adjustment of strikes, expiration dates, size (quantity), and premiums.
 * **Pre-configured Preset Spreads:** Instantly load standard strategies (e.g., Bull Call Spreads, Bear Put Spreads, Straddles, Strangles, Iron Condors).
