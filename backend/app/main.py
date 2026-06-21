@@ -96,7 +96,7 @@ async def init_redis():
         
         # Start background listener task
         redis_pubsub = redis_client.pubsub()
-        await redis_pubsub.subscribe("portfolio:updates", "macro:feed:raw")
+        await redis_pubsub.subscribe("portfolio:updates", "macro:feed:raw", "alphaaegis-macro-events")
         redis_listener_task = asyncio.create_task(redis_message_listener())
     except Exception as e:
         logger.warning(f"Could not connect to Redis: {e}. Falling back to in-memory broker mode.")
@@ -112,7 +112,7 @@ async def redis_message_listener():
                 data_str = message.get("data")
                 try:
                     payload = json.loads(data_str)
-                    if channel == "macro:feed:raw":
+                    if channel in ("macro:feed:raw", "alphaaegis-macro-events"):
                         db = SessionLocal()
                         try:
                             user = db.query(User).first()
