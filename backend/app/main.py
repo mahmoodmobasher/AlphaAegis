@@ -112,7 +112,32 @@ async def redis_message_listener():
                 data_str = message.get("data")
                 try:
                     payload = json.loads(data_str)
-                    if channel in ("macro:feed:raw", "alphaaegis-macro-events"):
+                    if channel == "macro:feed:raw":
+                        # 1. Intercept macro:feed:raw news feed and analyze using local Ollama instance
+                        headline = payload.get("headline") or payload.get("text", "")
+                        from app.services.ollama_client import analyze_sentiment_with_ollama
+                        ollama_metrics = await analyze_sentiment_with_ollama(headline)
+                        
+                        # Merge the parsed LLM metrics back into our payload
+                        payload["sentiment"] = ollama_metrics["sentiment"]
+                        
+                        iv_adj_val = ollama_metrics["iv_adj"]
+                        spot_shock_val = ollama_metrics["spot_shock"]
+                        
+                        # Convert fractional percentages (e.g. 0.025 to 2.5) for backend pricing engine calculations if needed
+                        if -1.0 < iv_adj_val < 1.0 and iv_adj_val != 0.0:
+                            iv_adj_val *= 100.0
+                        if -1.0 < spot_shock_val < 1.0 and spot_shock_val != 0.0:
+                            spot_shock_val *= 100.0
+                            
+                        payload["iv_adj"] = iv_adj_val
+                        payload["spot_shock"] = spot_shock_val
+                        
+                        # Publish final enriched payload onto our active 'alphaaegis-macro-events' Redis channel
+                        if redis_client:
+                            await redis_client.publish("alphaaegis-macro-events", json.dumps(payload))
+                            
+                    elif channel == "alphaaegis-macro-events":
                         db = SessionLocal()
                         try:
                             user = db.query(User).first()

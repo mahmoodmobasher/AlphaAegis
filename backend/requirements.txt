@@ -16,3 +16,4 @@ yfinance>=0.2.38
 pandas>=2.2.0
 ibapi
 feedparser>=6.0.12
+httpx>=0.28.1

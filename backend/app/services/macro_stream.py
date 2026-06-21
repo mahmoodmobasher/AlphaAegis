@@ -92,8 +92,7 @@ async def fetch_and_emit_feed(url: str, redis_client: aioredis.Redis, name: str)
             }
             
             payload_str = json.dumps(event_payload)
-            # Emit to alphaaegis-macro-events as requested, and fallback channel macro:feed:raw
-            await redis_client.publish("alphaaegis-macro-events", payload_str)
+            # Publish to macro:feed:raw so it gets intercepted and analyzed by the Ollama model
             await redis_client.publish("macro:feed:raw", payload_str)
             logger.info(f"Published RSS macro event from {name}: {title} (Sentiment: {sentiment})")
     except Exception as e:
