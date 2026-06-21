@@ -83,12 +83,6 @@ export default function Navbar() {
                 <span className="text-sm text-slate-400">Settings</span>
               </button>
             )}
-            <button 
-              onClick={() => router.push("/flow")} 
-              className={`hover:text-white transition flex items-center gap-1 ${pathname === "/flow" ? "text-white" : ""}`}
-            >
-              Flow <ChevronDown className="h-3 w-3" />
-            </button>
           </div>
 
           {/* Right Section: Auth States */}

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useTransition } from "react";
+import React, { useState, useEffect, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { 
   Briefcase, 
@@ -253,66 +253,44 @@ export default function PortfolioPage() {
     setVolatility(0.28);
   }, [viewMode, setSpotPrice, setVolatility]);
 
-  // WebSocket event-driven communication
+  // WebSocket event‑driven communication (persisted via useRef)
+  const wsRef = useRef<WebSocket | null>(null);
+
   useEffect(() => {
+    // Ensure the user is authenticated before establishing a connection
     if (!store.token || !store.isAuthenticated) return;
-    
-    // Connect to WebSocket gateway
-    const ws = new WebSocket("ws://localhost:8000/ws/portfolio-analytics");
-    
-    ws.onopen = () => {
-      console.log("WebSocket connected to portfolio-analytics");
-      sendWebSocketPayload();
-    };
 
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.error) {
-          console.error("WebSocket calculation error:", data.error);
-          setRiskError(data.error);
-        } else {
-          setRiskData(data);
-          setRiskError(null);
-          
-          if (data.debate_logs) {
-            setDebateLogs(data.debate_logs);
+    // Create the WebSocket only once per component lifecycle
+    if (!wsRef.current) {
+      wsRef.current = new WebSocket("ws://localhost:8000/ws/portfolio-analytics");
+      const ws = wsRef.current;
+
+      ws.onopen = () => {
+        console.log("WebSocket connected to portfolio-analytics");
+        // Send the initial payload once the socket is open
+        sendWebSocketPayload();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.error) {
+            console.error("WebSocket calculation error:", data.error);
+            setRiskError(data.error);
+          } else {
+            setRiskData(data);
+            setRiskError(null);
+            if (data.debate_logs) setDebateLogs(data.debate_logs);
+            if (data.advisory_report) setAdvisoryReport(data.advisory_report);
+            if (data.summary_report) setSummaryReport(data.summary_report);
+            if (data.recommendations) setRecommendations(data.recommendations);
+            if (data.macro_headline) setMacroHeadline(data.macro_headline);
+            if (data.macro_sentiment_score !== undefined) setMacroSentimentScore(data.macro_sentiment_score);
+            if (data.greeks_commentary) usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
           }
-          if (data.advisory_report) {
-            setAdvisoryReport(data.advisory_report);
-          }
-          if (data.summary_report) {
-            setSummaryReport(data.summary_report);
-          }
-          if (data.recommendations) {
-            setRecommendations(data.recommendations);
-          }
-          if (data.macro_headline) {
-            setMacroHeadline(data.macro_headline);
-          }
-          if (data.macro_sentiment_score !== undefined) {
-            setMacroSentimentScore(data.macro_sentiment_score);
-          }
-          
-          if (data.greeks_commentary) {
-            usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
-          }
+        } catch (err) {
+          console.error("Error parsing WebSocket JSON frame:", err);
         }
-      } catch (err) {
-        console.error("Error parsing WebSocket JSON frame:", err);
-      }
-    };
-
-    ws.onerror = (err) => {
-      console.error("WebSocket error:", err);
-    };
-
-    const sendWebSocketPayload = () => {
-      if (ws.readyState === WebSocket.OPEN) {
-        const spotShockPct = ((spotPrice - 180) / 180) * 100;
-        const ivShockPct = ((volatility - 0.28) / 0.28) * 100;
-
-        let payload: any;
         if (customJsonActive) {
           try {
             payload = JSON.parse(customJson);
@@ -326,9 +304,7 @@ export default function PortfolioPage() {
           }
         } else {
           const activeData = viewMode === "local" ? portfolioData : ibPortfolioData;
-          if (!activeData || !activeData.positions || activeData.positions.length === 0) {
-            return;
-          }
+          if (!activeData || !activeData.positions || activeData.positions.length === 0) return;
 
           const positions = activeData.positions.map((pos: any) => {
             const isOptionCombo = pos.legs && pos.legs.length > 0;
@@ -384,10 +360,47 @@ export default function PortfolioPage() {
             }
           };
         }
-
         ws.send(JSON.stringify(payload));
       }
     };
+
+    // Create the WebSocket only once per component lifecycle
+    if (!wsRef.current) {
+      wsRef.current = new WebSocket("ws://localhost:8000/ws/portfolio-analytics");
+      const ws = wsRef.current;
+
+      ws.onopen = () => {
+        console.log("WebSocket connected to portfolio-analytics");
+        // Send the initial payload once the socket is open
+        sendWebSocketPayload();
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.error) {
+            console.error("WebSocket calculation error:", data.error);
+            setRiskError(data.error);
+          } else {
+            setRiskData(data);
+            setRiskError(null);
+            if (data.debate_logs) setDebateLogs(data.debate_logs);
+            if (data.advisory_report) setAdvisoryReport(data.advisory_report);
+            if (data.summary_report) setSummaryReport(data.summary_report);
+            if (data.recommendations) setRecommendations(data.recommendations);
+            if (data.macro_headline) setMacroHeadline(data.macro_headline);
+            if (data.macro_sentiment_score !== undefined) setMacroSentimentScore(data.macro_sentiment_score);
+            if (data.greeks_commentary) usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
+          }
+        } catch (err) {
+          console.error("Error parsing WebSocket JSON frame:", err);
+        }
+      };
+
+      ws.onerror = (err) => {
+        console.error("WebSocket error:", err);
+      };
+    }
 
     const timer = setTimeout(() => {
       sendWebSocketPayload();
@@ -395,9 +408,19 @@ export default function PortfolioPage() {
 
     return () => {
       clearTimeout(timer);
-      ws.close();
+      // Cleanup will be handled by a separate effect
     };
   }, [activePositions, spotPrice, volatility, portfolioData, ibPortfolioData, viewMode, store.isAuthenticated, customJsonActive, customJson]);
+
+  // Cleanup WebSocket on component unmount
+  useEffect(() => {
+    return () => {
+      if (wsRef.current) {
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+    };
+  }, []);
 
   // AI Committee & Command Bar States
   const [commandQuery, setCommandQuery] = useState("");
@@ -1560,10 +1583,7 @@ export default function PortfolioPage() {
               <p className="text-xs text-text-sub">Please log in or sign up via the top navigation bar to access portfolio management features.</p>
               
               <button
-                onClick={() => {
-                  // Direct user to Navbar login by giving tips
-                  alert("Please click the 'Log In' button in the top right of the navigation bar to sign in!");
-                }}
+                onClick={() => router.push("/login")}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-lg shadow-indigo-600/20 flex items-center justify-center gap-1.5 transition"
               >
                 Sign In To Unlock <ArrowRight className="h-3.5 w-3.5" />
