@@ -1134,7 +1134,7 @@ export default function PortfolioPage() {
         usePortfolioStore.getState().setActivePositions(mappedPositions);
       }
     } catch (err: any) {
-      console.error("Failed to load IB portfolio data", err);
+      console.warn("Failed to load IB portfolio data (Gateway might be offline):", err.message || err);
       setIbError(err.message || "Failed to load live Interactive Brokers data. Please check if TWS or IB Gateway is running locally on the configured port.");
     } finally {
       setIbLoading(false);
