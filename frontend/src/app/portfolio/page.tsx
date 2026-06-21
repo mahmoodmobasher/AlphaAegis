@@ -374,7 +374,13 @@ export default function PortfolioPage() {
       };
 
       ws.onerror = (err) => {
-        console.error("WebSocket error:", err);
+        console.warn("WebSocket connection error:", err);
+        setRiskError("Failed to establish real-time analytics connection. Make sure the backend server is running.");
+      };
+
+      ws.onclose = () => {
+        console.log("WebSocket connection closed, resetting reference.");
+        wsRef.current = null;
       };
     }
 
