@@ -260,37 +260,13 @@ export default function PortfolioPage() {
     // Ensure the user is authenticated before establishing a connection
     if (!store.token || !store.isAuthenticated) return;
 
-    // Create the WebSocket only once per component lifecycle
-    if (!wsRef.current) {
-      wsRef.current = new WebSocket("ws://localhost:8000/ws/portfolio-analytics");
+    const sendWebSocketPayload = () => {
       const ws = wsRef.current;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        const spotShockPct = ((spotPrice - 180) / 180) * 100;
+        const ivShockPct = ((volatility - 0.28) / 0.28) * 100;
 
-      ws.onopen = () => {
-        console.log("WebSocket connected to portfolio-analytics");
-        // Send the initial payload once the socket is open
-        sendWebSocketPayload();
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.error) {
-            console.error("WebSocket calculation error:", data.error);
-            setRiskError(data.error);
-          } else {
-            setRiskData(data);
-            setRiskError(null);
-            if (data.debate_logs) setDebateLogs(data.debate_logs);
-            if (data.advisory_report) setAdvisoryReport(data.advisory_report);
-            if (data.summary_report) setSummaryReport(data.summary_report);
-            if (data.recommendations) setRecommendations(data.recommendations);
-            if (data.macro_headline) setMacroHeadline(data.macro_headline);
-            if (data.macro_sentiment_score !== undefined) setMacroSentimentScore(data.macro_sentiment_score);
-            if (data.greeks_commentary) usePortfolioStore.getState().setAiCommentary(data.greeks_commentary);
-          }
-        } catch (err) {
-          console.error("Error parsing WebSocket JSON frame:", err);
-        }
+        let payload: any;
         if (customJsonActive) {
           try {
             payload = JSON.parse(customJson);
@@ -408,7 +384,6 @@ export default function PortfolioPage() {
 
     return () => {
       clearTimeout(timer);
-      // Cleanup will be handled by a separate effect
     };
   }, [activePositions, spotPrice, volatility, portfolioData, ibPortfolioData, viewMode, store.isAuthenticated, customJsonActive, customJson]);
 
