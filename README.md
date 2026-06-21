@@ -47,13 +47,19 @@ Directly integrated into the portfolio dashboard, this engine provides automated
 * This logic is defined in [generate_greeks_commentary](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py#L716-L791) in [risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py).
 
 ### 4. Multi-Agent AI Investment Committee Room & Real-Time Macro Sentiment Feed
-* **Live Event-Driven Stream Ingestion:** Periodically generates mock financial news headlines and streams text payloads via [macro_stream.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/macro_stream.py) directly into a Redis Pub/Sub backplane channel named `macro:feed:raw`.
+* **Live RSS Financial Wire Aggregator:** Aggregates live macroeconomic news headlines concurrently from Yahoo Finance, CNBC, and MarketWatch using [macro_stream.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/macro_stream.py) every 60 seconds. Enforces in-memory title deduplication and utilizes keyword-based sentiment extraction to dynamically trigger portfolio spot/volatility stress tests. Formatted payloads are emitted to Redis under `"alphaaegis-macro-events"` and `"macro:feed:raw"` channels.
 * **Dynamic AI Investment Committee Feeds:** Highlights how the LangGraph multi-agent committee—consisting of a **Macro Risk Agent** (interprets macro headline sentiment and defines IV/spot shocks), an **Options Specialist Agent** (triggers the CRR Binomial Lattice engine in [pricing.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/pricing.py) to re-price active options), and a **Portfolio Manager Coordinator Agent**—processes sentiment vectors and runs automated portfolio risk shocks in real-time.
 * **Glassmorphic Headline Monitor:** A frontend UI banner within the Committee Room tab that dynamically maps `macroHeadline` and `macroSentimentScore` with a flashing indicator light completely driven by async WebSocket broadcast frames.
 * **LangGraph Debate Orchestration:** Simulates a dialectical debate twice daily (or on-demand) between an **Options Specialist Agent**, a **Macro Risk Agent**, and a **Portfolio Manager Coordinator Agent** (implemented in [agents.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/agents.py)).
 * **Advisory Report:** Output includes detailed logs, staged compliance recommendations, and a narrative summary report displayed directly in the dashboard left drawer.
 
-### 5. Production Hardening & Robustness
+### 5. Login Authentication Routing & Gateway Fallbacks
+* **Unauthenticated Lock Gates**: Intercepts unauthenticated navigation trying to access portfolio analytics, programmatically redirecting the user to `/login`.
+* **Login & Registration Portal**: Features a dedicated [login page](file:///Users/moemahmood/builder_code/myoption/frontend/src/app/login/page.tsx) matching the home page `AuthModal` styling. Integrates Google Identity Sign-in and standard credential logins, storing active session tokens to the Zustand strategy store.
+* **Resilient Options Chain Gateway**: If the Interactive Brokers (IB) Gateway is offline or connection fails, the `/api/chain` endpoints automatically cascade and fetch delayed option data & expiration dates from Yahoo Finance, showing a warning banner to the user.
+* **WebSocket Fault-Tolerance**: Handles WebSocket connection issues as warnings instead of console-error exceptions, preventing Next.js dev server overlays, and automatically resets the WebSocket reference on close to enable self-healing reconnections.
+
+### 6. Production Hardening & Robustness
 * **Frontend Debounce (150ms):** Implements a debouncing delay on the spot price and IV shock sliders in [page.tsx](file:///Users/moemahmood/builder_code/myoption/frontend/src/app/portfolio/page.tsx) to prevent rapid consecutive API requests and backend event-loop congestion.
 * **Strict Pydantic Validation:** The `/api/agents/command` endpoint utilizes the strict [CommandFilters](file:///Users/moemahmood/builder_code/myoption/backend/app/routers/agents.py#L25-L32) validation model, filtering out malformed natural language queries.
 
