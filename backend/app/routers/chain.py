@@ -75,7 +75,7 @@ async def get_chain_expirations(
 ):
     """Get the available expiration dates for a ticker symbol."""
     if current_user:
-        # Authenticated path – use IB if config provided, DO NOT fallback to Yahoo Finance
+        # Authenticated path – use IB if config provided, fall back to Yahoo Finance
         if config_id:
             config = db.query(IBConfig).filter(IBConfig.id == config_id, IBConfig.user_id == current_user.id).first()
             if config:
@@ -95,9 +95,23 @@ async def get_chain_expirations(
                     if expirations_set:
                         return sorted(list(expirations_set))
                 except Exception as e:
-                    print(f"IB expirations fetch failed: {e}. Falling back to mock data for authenticated user.")
+                    print(f"IB expirations fetch failed: {e}. Falling back to Yahoo Finance for authenticated user.")
+                    try:
+                        expirations = YahooFinanceClient.fetch_expirations(symbol)
+                        if expirations:
+                            return sorted(expirations)
+                    except Exception as yfe:
+                        print(f"Yahoo Finance fallback fetch failed: {yfe}. Falling back to mock data.")
         
-        # Fallback to mock data provider (no Yahoo Finance)
+        # Fallback to Yahoo Finance
+        try:
+            expirations = YahooFinanceClient.fetch_expirations(symbol)
+            if expirations:
+                return sorted(expirations)
+        except Exception as yfe:
+            print(f"Yahoo Finance fetch failed: {yfe}. Falling back to mock data.")
+
+        # Fallback to mock data provider
         try:
             expirations = market_data_provider.get_expiration_dates(symbol)
             if not expirations:
@@ -259,10 +273,21 @@ async def get_option_chain(
                             "source": "ib"
                         }
                 except Exception as e:
-                    # Propagate error to client instead of silently using mock data
-                    raise HTTPException(status_code=504, detail=f"Failed to fetch option chain from IB: {e}")
+                    print(f"Failed to fetch option chain from IB: {e}. Falling back to Yahoo Finance.")
+                    try:
+                        yf_data = YahooFinanceClient.fetch_option_chain(symbol, expiration)
+                        return yf_data
+                    except Exception as yfe:
+                        print(f"Yahoo Finance fallback fetch failed: {yfe}. Falling back to mock data.")
 
-        # Fallback to mock data provider for authenticated user (no Yahoo Finance)
+        # Fallback to Yahoo Finance
+        try:
+            yf_data = YahooFinanceClient.fetch_option_chain(symbol, expiration)
+            return yf_data
+        except Exception as yfe:
+            print(f"Yahoo Finance fetch failed: {yfe}. Falling back to mock data.")
+
+        # Fallback to mock data provider for authenticated user
         try:
             spot = market_data_provider.get_spot_price(symbol)
             if not spot:
