@@ -1,99 +1,257 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight } from "lucide-react";
+import { Lock, Mail, User, ArrowLeft } from "lucide-react";
+import { authApi } from "@/services/api";
+import { useStrategyStore } from "@/store/useStrategyStore";
+
+// Load Google Identity Services script once
+let googleScriptLoaded = false;
+function loadGoogleScript(callback: () => void) {
+  if (googleScriptLoaded) return callback();
+  const script = document.createElement("script");
+  script.src = "https://accounts.google.com/gsi/client";
+  script.async = true;
+  script.onload = () => {
+    googleScriptLoaded = true;
+    callback();
+  };
+  document.head.appendChild(script);
+}
 
 export default function LoginPage() {
   const router = useRouter();
+  const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [fullName, setFullName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleCredentialResponse = async (response: any) => {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/auth/login", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ email, password }),
-      });
-
-      if (!response.ok) {
-        const errMsg = await response.text();
-        throw new Error(errMsg || "Login failed");
-      }
-
-      const data = await response.json();
-      // Assuming the FastAPI endpoint returns { access_token: string } or an array of strings
-      const token = Array.isArray(data.access_token) ? data.access_token[0] : data.access_token;
-      if (token) {
-        localStorage.setItem("access_token", token);
-        // Optionally set a cookie:
-        // document.cookie = `access_token=${token}; path=/; secure; sameSite=strict`;
+      console.log("Google credential received:", response.credential?.slice(0, 20));
+      const result = await authApi.googleLogin(response.credential);
+      
+      if (result?.access_token) {
+        const userDetails = await authApi.getMe(result.access_token);
+        const store = useStrategyStore.getState();
+        store.login(result.access_token, userDetails);
         router.push("/portfolio");
       } else {
         throw new Error("No access token returned");
       }
-    } catch (err: any) {
-      setError(err.message || "An error occurred");
+    } catch (e: any) {
+      console.error("Google sign‑in error:", e);
+      setError(e.message || "Google authentication failed");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (isLogin) {
+        // Login flow
+        const authData = await authApi.login(email, password);
+        // Fetch current user details
+        const userDetails = await authApi.getMe(authData.access_token);
+        
+        const store = useStrategyStore.getState();
+        store.login(authData.access_token, userDetails);
+        router.push("/portfolio");
+      } else {
+        // Register flow
+        await authApi.register(email, password, fullName);
+        // Auto-login after registration
+        const authData = await authApi.login(email, password);
+        const userDetails = await authApi.getMe(authData.access_token);
+        
+        const store = useStrategyStore.getState();
+        store.login(authData.access_token, userDetails);
+        router.push("/portfolio");
+      }
+    } catch (err: any) {
+      setError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadGoogleScript(() => {
+      const gWindow = window as any;
+      if (gWindow.google && gWindow.google.accounts && gWindow.google.accounts.id) {
+        gWindow.google.accounts.id.initialize({
+          client_id: process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID as string,
+          callback: handleCredentialResponse,
+          auto_select: false,
+        });
+        gWindow.google.accounts.id.renderButton(
+          document.getElementById("google-signin-button"),
+          { theme: "outline", size: "large", width: 280 }
+        );
+      } else {
+        console.error("Google Identity Services script failed to load.");
+        setError("Unable to load Google Sign‑In. Please try again later.");
+      }
+    });
+    return () => {
+      (window as any).google?.accounts?.id?.cancel();
+    };
+  }, [isLogin]);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-bg-base p-4">
-      <div className="w-full max-w-md space-y-6 rounded-2xl bg-bg-panel p-8 shadow-xl border border-border-panel">
-        <h2 className="text-center text-2xl font-bold text-text-main mb-4">
-          Sign In
-        </h2>
+      <div className="relative w-full max-w-md bg-slate-950/95 border border-slate-800 rounded-2xl p-8 shadow-2xl text-white">
+        
+        {/* Back Button */}
+        <button
+          onClick={() => router.push("/portfolio")}
+          className="absolute top-4 left-4 p-1.5 text-slate-400 hover:text-white rounded-lg transition-colors hover:bg-slate-900 flex items-center gap-1 text-xs"
+        >
+          <ArrowLeft className="h-4 w-4" /> Back
+        </button>
+
+        {/* Title & Description */}
+        <div className="text-center mb-6 mt-4">
+          <h2 className="text-2xl font-black bg-gradient-to-r from-indigo-400 to-emerald-400 bg-clip-text text-transparent">
+            {isLogin ? "Welcome Back" : "Create Account"}
+          </h2>
+          <p className="text-slate-400 text-xs mt-1">
+            {isLogin ? "Sign in to simulate your strategies" : "Start your options strategic trial"}
+          </p>
+        </div>
+
+        {/* Error Notification */}
         {error && (
-          <div className="rounded-md bg-red-100 p-2 text-sm text-red-700">
+          <div className="mb-4 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-200 text-xs font-semibold">
             {error}
           </div>
         )}
+
+        {/* Auth Form */}
         <form onSubmit={handleSubmit} className="space-y-4">
+          
+          {/* Full Name field (only for sign up) */}
+          {!isLogin && (
+            <div>
+              <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                Full Name
+              </label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                  <User className="h-4 w-4" />
+                </span>
+                <input
+                  type="text"
+                  required
+                  value={fullName}
+                  onChange={(e) => setFullName(e.target.value)}
+                  placeholder="John Doe"
+                  className="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600 transition"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Email field */}
           <div>
-            <label htmlFor="email" className="block text-sm font-medium text-text-sub mb-1">
-              Email
+            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+              Email Address
             </label>
-            <input
-              id="email"
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-md border border-border-panel bg-bg-base px-3 py-2 text-text-main focus:border-indigo-500 focus:outline-none"
-            />
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                <Mail className="h-4 w-4" />
+              </span>
+              <input
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@example.com"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600 transition"
+              />
+            </div>
           </div>
+
+          {/* Password field */}
           <div>
-            <label htmlFor="password" className="block text-sm font-medium text-text-sub mb-1">
+            <label className="block text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              required
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-md border border-border-panel bg-bg-base px-3 py-2 text-text-main focus:border-indigo-500 focus:outline-none"
-            />
+            <div className="relative">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-500">
+                <Lock className="h-4 w-4" />
+              </span>
+              <input
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="••••••••"
+                className="w-full bg-slate-900 border border-slate-800 rounded-xl py-2 pl-10 pr-4 text-sm focus:outline-none focus:border-indigo-500 text-white placeholder-slate-600 transition"
+              />
+            </div>
           </div>
+
+          {/* Submit Button */}
           <button
             type="submit"
             disabled={loading}
-            className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-white hover:bg-indigo-500 disabled:opacity-50"
+            className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-500/20 transition duration-150 relative overflow-hidden"
           >
-            {loading ? "Signing in..." : "Sign In"}
-            <ArrowRight className="h-4 w-4" />
+            {loading ? (
+              <span className="flex items-center justify-center gap-2">
+                <svg className="animate-spin h-4 w-4 text-white" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                </svg>
+                Processing...
+              </span>
+            ) : isLogin ? (
+              "Sign In"
+            ) : (
+              "Create Account"
+            )}
           </button>
         </form>
+
+        {/* Toggle between Login and Signup */}
+        <div className="mt-4 text-center">
+          <button
+            onClick={() => {
+              setIsLogin(!isLogin);
+              setError(null);
+            }}
+            className="text-xs text-indigo-400 hover:underline hover:text-indigo-300"
+          >
+            {isLogin ? "Don't have an account? Sign Up" : "Already have an account? Sign In"}
+          </button>
+        </div>
+
+        {/* Divider */}
+        <div className="relative my-6">
+          <div className="absolute inset-0 flex items-center">
+            <div className="w-full border-t border-slate-800/80"></div>
+          </div>
+          <div className="relative flex justify-center text-xs uppercase">
+            <span className="bg-slate-950 px-2 text-slate-500 font-bold">Or continue with</span>
+          </div>
+        </div>
+
+        {/* Google Sign-In Button */}
+        <div className="flex justify-center">
+          <div id="google-signin-button" className="min-h-[40px] flex justify-center items-center" />
+        </div>
+
       </div>
     </div>
   );
