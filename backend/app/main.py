@@ -379,6 +379,16 @@ async def startup_event():
     global mock_macro_task, macro_worker_task
     await init_redis()
     
+    # Broadcast an immediate system ping to wake up active listeners
+    try:
+        import redis
+        import json
+        r = redis.Redis(host="127.0.0.1", port=6379, db=0)
+        r.publish('alphaaegis-macro-events', json.dumps({"headline": "SYSTEM_PING: AlphaAegis backend lifecycle synchronized natively.", "sentiment": 0.0}))
+        logger.info("Successfully published startup SYSTEM_PING to Redis channel 'alphaaegis-macro-events'")
+    except Exception as e:
+        logger.warning(f"Could not publish startup SYSTEM_PING to Redis: {e}")
+    
     # Start macro Ingestion stream worker
     from app.services.macro_stream import start_macro_stream_worker
     macro_worker_task = asyncio.create_task(start_macro_stream_worker(REDIS_URL))
