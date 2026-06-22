@@ -265,7 +265,7 @@ Example:
                         analytics_res = await run_langgraph_committee_feed(portfolio_state, payload, active_macro_events)
                         await manager.broadcast(json.dumps(analytics_res))
                     else:
-                        analytics_res = run_calculations(payload)
+                        analytics_res = await run_calculations(payload)
                         await manager.broadcast(json.dumps(analytics_res))
                 except Exception as e:
                     logger.error(f"Error processing Redis pub/sub message on channel {channel}: {e}")
@@ -275,7 +275,7 @@ Example:
     except Exception as e:
         logger.error(f"Redis listener encountered error: {e}")
 
-def run_calculations(payload: dict) -> dict:
+async def run_calculations(payload: dict) -> dict:
     try:
         raw_positions = []
         for pos in payload.get("positions", []):
@@ -307,14 +307,89 @@ def run_calculations(payload: dict) -> dict:
         beta_weighted = calculate_beta_weighted_delta(parsed_positions, spx_price)
         var_limits = calculate_value_at_risk(parsed_positions)
         
+        aggregated_greeks = payload.get("aggregated_greeks", {})
+        delta = aggregated_greeks.get("delta", 0.0)
+        gamma = aggregated_greeks.get("gamma", 0.0)
+        theta = aggregated_greeks.get("theta", 0.0)
+        vega = aggregated_greeks.get("vega", 0.0)
+        rho = aggregated_greeks.get("rho", 0.0)
+
         summary = payload.get("portfolio_summary", {})
-        net_liq = summary.get("net_liquidity", 5000.0)
+        net_liq = summary.get("net_liquidity") or summary.get("net_liquidation") or 5000.0
         maint_margin = summary.get("maintenance_margin", 3000.0)
         daily_pnl = summary.get("daily_pnl", 0.0)
         
         compliance_status = calculate_compliance_alert(net_liq, maint_margin)
         daily_expected = calculate_daily_expected_return(parsed_positions, net_liq)
-        greeks_commentary = generate_greeks_commentary(parsed_positions, daily_expected)
+
+        # Query active model profile from the database cache
+        db = SessionLocal()
+        provider_id = "ollama"
+        model_name = "llama3"
+        try:
+            config = db.query(LLMProviderConfig).filter(LLMProviderConfig.is_active == True).first()
+            if not config:
+                config = db.query(LLMProviderConfig).first()
+            if config:
+                provider_id = config.provider_id
+                model_name = config.default_model
+        except Exception as dbe:
+            logger.error(f"Error querying active LLM config from DB: {dbe}")
+        finally:
+            db.close()
+
+        # Format system prompt context with real-time portfolio metrics
+        prompt = f"""You are an institutional quantitative risk analyst agent integrated into the AlphaAegis Options Suite.
+
+Analyze the following active real-time portfolio risk metrics:
+- Net Liquidation: ${net_liq:,.2f}
+- Portfolio Aggregated Delta: {delta:,.4f}
+- Portfolio Aggregated Gamma: {gamma:,.4f}
+- Portfolio Aggregated Theta: {theta:,.4f}
+- Portfolio Aggregated Vega: {vega:,.4f}
+- Portfolio Aggregated Rho: {rho:,.4f}
+
+Evaluate the directional exposure (Delta), acceleration of directional exposure (Gamma), time decay capture (Theta), volatility sensitivity (Vega), and interest rate sensitivity (Rho) relative to the Net Liquidation value.
+Provide a professional, concise, institutional-grade Markdown risk and performance commentary.
+Begin your response immediately with "### AI Risk & Performance Commentary". Do not write any conversational pleasantries, introductory greetings, or JSON wrappers. Do not wrap your response in markdown code blocks like ```markdown."""
+
+        greeks_commentary = ""
+        llm = None
+        try:
+            llm = await get_dynamic_model(provider_id=provider_id, model_name=model_name, temperature=0.1)
+        except Exception as e:
+            logger.error(f"Failed to load dynamic model {provider_id}/{model_name} for greeks commentary: {e}")
+
+        if llm:
+            try:
+                response = await llm.ainvoke(prompt)
+                greeks_commentary = getattr(response, "content", str(response)).strip()
+            except Exception as e:
+                logger.error(f"Error invoking dynamic model for greeks commentary: {e}")
+
+        if not greeks_commentary:
+            # Fallback to local Ollama directly
+            import httpx
+            url = "http://localhost:11434/api/generate"
+            payload_ollama = {
+                "model": "llama3" if model_name == "mistral:latest" else model_name,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1
+                }
+            }
+            try:
+                async with httpx.AsyncClient(timeout=10.0) as client:
+                    resp = await client.post(url, json=payload_ollama)
+                    if resp.status_code == 200:
+                        result_json = resp.json()
+                        greeks_commentary = result_json.get("response", "").strip()
+            except Exception as exc:
+                logger.error(f"Failed direct Ollama fallback for greeks commentary: {exc}")
+
+        if not greeks_commentary:
+            greeks_commentary = "### AI Risk & Performance Commentary\n\nDynamic AI analysis is currently unavailable. Please verify that your local Ollama instance is active."
         
         shock_scenario = payload.get("shock_scenario")
         pro_forma_data = None
@@ -547,7 +622,7 @@ async def websocket_portfolio_analytics(websocket: WebSocket):
                     await redis_client.publish("portfolio:updates", data)
                 else:
                     # Redis fallback: calculate directly and broadcast to all active connections in memory
-                    analytics_res = run_calculations(payload)
+                    analytics_res = await run_calculations(payload)
                     await manager.broadcast(json.dumps(analytics_res))
             except json.JSONDecodeError:
                 await websocket.send_text(json.dumps({"error": "Invalid JSON format"}))
