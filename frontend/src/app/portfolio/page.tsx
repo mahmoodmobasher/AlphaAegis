@@ -368,11 +368,26 @@ export default function PortfolioPage() {
             }
           });
 
-          const summary = getPortfolioSummaryHelper(activeData);
+          const summary = {
+            net_liquidity: activeData.summary?.net_liquidation || parseFloat(ibPortfolioData?.summary?.NetLiquidation?.value) || 5000.0,
+            total_cash: parseFloat(ibPortfolioData?.summary?.TotalCashValue?.value) || 0.0,
+            buying_power: parseFloat(ibPortfolioData?.summary?.BuyingPower?.value) || 3000.0,
+            maint_margin: parseFloat(ibPortfolioData?.summary?.MaintMarginReq?.value) || 3000.0,
+            daily_pnl: activeData.summary?.total_pnl || 0.0
+          };
+
+          const activeGreeks = viewMode === "local" ? portfolioData?.summary?.greeks : ibPortfolioData?.summary?.greeks;
 
           payload = {
             portfolio_summary: summary,
             positions: positions,
+            aggregated_greeks: {
+              delta: activeGreeks?.delta || 0,
+              gamma: activeGreeks?.gamma || 0,
+              theta: activeGreeks?.theta || 0,
+              vega: activeGreeks?.vega || 0,
+              rho: activeGreeks?.rho || 0
+            },
             shock_scenario: {
               spot_shock_pct: spotShockPct,
               iv_shock_pct: ivShockPct
