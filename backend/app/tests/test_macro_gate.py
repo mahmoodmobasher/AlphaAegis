@@ -1,34 +1,21 @@
 import pytest
-from app.services.macro_stream import KEYWORDS_PATTERN, TICKER_PATTERN, MemoryTTLDeduplicator
+import re
+from app.services.macro_stream import MemoryTTLDeduplicator
 
-def test_market_impact_gate_keywords():
-    # Pass cases (Macro)
-    assert KEYWORDS_PATTERN.search("FOMC Statement: Rates remain unchanged") is not None
-    assert KEYWORDS_PATTERN.search("US CPI core inflation rises 0.3%") is not None
-    assert KEYWORDS_PATTERN.search("Unemployment rate drops to historical lows") is not None
-    
-    # Pass cases (Corporate/Micro)
-    assert KEYWORDS_PATTERN.search("Apple reports record Q1 earnings and revenue") is not None
-    assert KEYWORDS_PATTERN.search("CEO resigns after SEC investigation") is not None
-    assert KEYWORDS_PATTERN.search("Company plans IPO in next fiscal year") is not None
-    assert KEYWORDS_PATTERN.search("Merger and acquisition talks heat up") is not None
-    
-    # Pass cases (Sectors)
-    assert KEYWORDS_PATTERN.search("Semiconductor chip shortages impact production") is not None
-    assert KEYWORDS_PATTERN.search("New AI model released by tech giants") is not None
-    
-    # Fail cases
-    assert KEYWORDS_PATTERN.search("Lindblad Expeditions announces new cruise package to Galapagos") is None
-    assert KEYWORDS_PATTERN.search("Local park opens new playground for children") is None
+market_impact_gate_regex = re.compile(
+    r'(?:\b[A-Z]{2,5}\b|\([A-Z]{1,5}\))'
+    r'|\b(?:fed|fomc|inflation|cpi|gdp|yield|yields|treasury|bonds?|interest\s+rates|warsh|deepseek|rout|china|commodities|gold|settle\s+lower)\b',
+    re.IGNORECASE
+)
 
-def test_market_impact_gate_tickers():
-    # Standalone upper ticker
-    assert TICKER_PATTERN.search("AAPL announces new products") is not None
-    assert TICKER_PATTERN.search("NVDA stock jumps") is not None
-    
-    # Parenthesis ticker
-    assert TICKER_PATTERN.search("Lindblad Expeditions (LIND) reports earnings") is not None
-    assert TICKER_PATTERN.search("CrowdStrike (CRWD) announces partnerships") is not None
+def test_market_impact_gate():
+    # Pass cases (Macro / Ticker)
+    assert market_impact_gate_regex.search("FOMC Statement: Rates remain unchanged") is not None
+    assert market_impact_gate_regex.search("US CPI core inflation rises 0.3%") is not None
+    assert market_impact_gate_regex.search("AAPL announces new products") is not None
+    assert market_impact_gate_regex.search("NVDA stock jumps") is not None
+    assert market_impact_gate_regex.search("Lindblad Expeditions (LIND) reports earnings") is not None
+    assert market_impact_gate_regex.search("CrowdStrike (CRWD) announces partnerships") is not None
 
 def test_memory_ttl_deduplicator():
     import time

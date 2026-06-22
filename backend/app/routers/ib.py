@@ -33,7 +33,7 @@ async def test_ib_connection(
         client = await get_global_ib_client(config.host, int(config.port), int(config.client_id))
         return {"connected": True, "host": config.host, "port": config.port}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Connection failed: {e}")
+        return {"connected": False, "host": config.host, "port": config.port, "error": str(e)}
 
 @router.get("/ib/account")
 async def get_account_summary(

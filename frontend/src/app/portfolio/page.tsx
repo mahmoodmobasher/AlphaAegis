@@ -188,6 +188,54 @@ const getAssetBreakdown = (normalizedPositions: NormalizedPosition[]) => {
   return Object.values(breakdown);
 };
 
+const getPortfolioSummaryHelper = (activeData: any) => {
+  if (!activeData || !activeData.summary) {
+    return {
+      net_liquidity: 5000.0,
+      excess_liquidity: 3000.0,
+      maintenance_margin: 3000.0,
+      daily_pnl: 0.0
+    };
+  }
+  const s = activeData.summary;
+  let netLiq = 5000.0;
+  if (s.net_liquidation !== undefined) {
+    netLiq = s.net_liquidation;
+  } else if (s.total_current_value !== undefined) {
+    netLiq = s.total_current_value;
+  } else if (s.NetLiquidation?.value !== undefined) {
+    netLiq = parseFloat(s.NetLiquidation.value) || 5000.0;
+  }
+  
+  let excessLiq = 3000.0;
+  if (s.buying_power !== undefined) {
+    excessLiq = s.buying_power;
+  } else if (s.BuyingPower?.value !== undefined) {
+    excessLiq = parseFloat(s.BuyingPower.value) || 3000.0;
+  }
+  
+  let maintMargin = 3000.0;
+  if (s.maint_margin_req !== undefined) {
+    maintMargin = s.maint_margin_req;
+  } else if (s.MaintMarginReq?.value !== undefined) {
+    maintMargin = parseFloat(s.MaintMarginReq.value) || 3000.0;
+  }
+  
+  let dailyPnl = 0.0;
+  if (s.total_pnl !== undefined) {
+    dailyPnl = s.total_pnl;
+  } else if (s.daily_pnl !== undefined) {
+    dailyPnl = s.daily_pnl;
+  }
+
+  return {
+    net_liquidity: netLiq,
+    excess_liquidity: excessLiq,
+    maintenance_margin: maintMargin,
+    daily_pnl: dailyPnl
+  };
+};
+
 export default function PortfolioPage() {
   const router = useRouter();
   const store = useStrategyStore();
@@ -320,12 +368,7 @@ export default function PortfolioPage() {
             }
           });
 
-          const summary = {
-            net_liquidity: activeData.summary?.net_liquidation || activeData.summary?.total_current_value || 5000.0,
-            excess_liquidity: activeData.summary?.buying_power || 3000.0,
-            maintenance_margin: activeData.summary?.maint_margin_req || 3000.0,
-            daily_pnl: activeData.summary?.total_pnl || 0.0
-          };
+          const summary = getPortfolioSummaryHelper(activeData);
 
           payload = {
             portfolio_summary: summary,
@@ -587,12 +630,7 @@ export default function PortfolioPage() {
         }
       });
 
-      const summary = {
-        net_liquidity: activeData.summary?.net_liquidation || activeData.summary?.total_current_value || 5000.0,
-        excess_liquidity: activeData.summary?.buying_power || 3000.0,
-        maintenance_margin: activeData.summary?.maint_margin_req || 3000.0,
-        daily_pnl: activeData.summary?.total_pnl || 0.0
-      };
+      const summary = getPortfolioSummaryHelper(activeData);
 
       const payload = {
         portfolio_summary: summary,
@@ -661,12 +699,7 @@ export default function PortfolioPage() {
           }
         });
 
-        const summary = {
-          net_liquidity: activeData.summary?.net_liquidation || activeData.summary?.total_current_value || 5000.0,
-          excess_liquidity: activeData.summary?.buying_power || 3000.0,
-          maintenance_margin: activeData.summary?.maint_margin_req || 3000.0,
-          daily_pnl: activeData.summary?.total_pnl || 0.0
-        };
+        const summary = getPortfolioSummaryHelper(activeData);
 
         baseline = {
           portfolio_summary: summary,
@@ -893,36 +926,7 @@ export default function PortfolioPage() {
 
   // Example scenario pre-population
   useEffect(() => {
-    const examplePayload = {
-      portfolio_summary: {
-        net_liquidity: 5400.00,
-        excess_liquidity: 3000.00,
-        maintenance_margin: 3000.00,
-        daily_pnl: -162.00
-      },
-      positions: [
-        {
-          ticker: "TQQQ",
-          type: "OPTION_COMBINATION",
-          strategy_name: "Jun05 75/70 Bull Put",
-          size: 1,
-          underlying_beta_to_spx: 3.02,
-          legs: [
-            {strike: 75.0, type: "PUT", expiration: "2026-06-05", position_type: "SHORT", delta: -0.42},
-            {strike: 70.0, type: "PUT", expiration: "2026-06-05", position_type: "LONG", delta: 0.21}
-          ]
-        },
-        {
-          ticker: "NVDA",
-          type: "EQUITY",
-          size: 4,
-          avg_price: 218.57,
-          current_price: 223.86,
-          underlying_beta_to_spx: 1.85
-        }
-      ]
-    };
-    setCustomJson(JSON.stringify(examplePayload, null, 2));
+    setCustomJson("");
   }, []);
 
   const fetchRiskAnalytics = async (customPayload?: any) => {
@@ -979,12 +983,7 @@ export default function PortfolioPage() {
           }
         });
 
-        const summary = {
-          net_liquidity: activeData.summary?.net_liquidation || activeData.summary?.total_current_value || 5000.0,
-          excess_liquidity: activeData.summary?.buying_power || 3000.0,
-          maintenance_margin: activeData.summary?.maint_margin_req || 3000.0,
-          daily_pnl: activeData.summary?.total_pnl || 0.0
-        };
+        const summary = getPortfolioSummaryHelper(activeData);
 
         payload = {
           portfolio_summary: summary,
