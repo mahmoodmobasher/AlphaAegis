@@ -19,17 +19,8 @@ async def analyze_sentiment_with_ollama(headline: str) -> Dict[str, Any]:
         "spot_shock": 0.0
     }
     
-    prompt = f"""You are a financial options risk analysis agent.
-Analyze the following macroeconomic news headline: "{headline}"
-Evaluate its sentiment and risk parameters.
-Output exactly a strict, unformatted JSON dictionary containing exactly these keys:
-- "sentiment": A float between -1.0 (extreme bearish/panic) and +1.0 (extreme bullish/risk-on)
-- "iv_adj": Volatility percentage shift as a float (e.g. 0.025 for +2.5% premium pump, -0.012 for -1.2% dump)
-- "spot_shock": Price movement percentage shift as a float (e.g. -0.018 for -1.8% drop, 0.015 for +1.5% rally)
-
-Return ONLY the raw JSON structure. No markdown blocks, no wrapping, no headers.
-Example:
-{{"sentiment": 0.4, "iv_adj": -0.01, "spot_shock": 0.015}}
+    prompt = f"""Analyze the macroeconomic sentiment of the provided headline. You must respond with a raw JSON object containing exactly three numeric keys: 'sentiment' (float from -1.0 to 1.0), 'iv_adj' (float representing volatility impact), and 'spot_shock' (float representing index price movement). Do not wrap the JSON in markdown code blocks or add any trailing commentary text.
+Headline: "{headline}"
 """
 
     try:
@@ -37,28 +28,28 @@ Example:
             payload = {
                 "model": MODEL_NAME,
                 "prompt": prompt,
+                "format": "json",
                 "stream": False,
                 "options": {
-                    "temperature": 0.1  # low temperature for high determinism
+                    "temperature": 0.0
                 }
             }
-            # Enforce JSON mode if model supports it
-            try:
-                payload["format"] = "json"
-            except Exception:
-                pass
 
             response = await client.post(OLLAMA_URL, json=payload)
             if response.status_code == 200:
                 result = response.json()
-                text = result.get("response", "").strip()
-                # Parse text response as JSON
+                raw_response = result.get("response", "").strip()
+                # Strip away markdown code fences if present
+                if raw_response.startswith("```json"):
+                    raw_response = raw_response.split("```json")[1].split("```")[0].strip()
+                elif raw_response.startswith("```"):
+                    raw_response = raw_response.split("```")[1].split("```")[0].strip()
+
                 try:
-                    data = json.loads(text)
-                    # Force values to float and validate structure
-                    sentiment = float(data.get("sentiment", 0.0))
-                    iv_adj = float(data.get("iv_adj", 0.0))
-                    spot_shock = float(data.get("spot_shock", 0.0))
+                    parsed_metrics = json.loads(raw_response)
+                    sentiment = float(parsed_metrics.get("sentiment", 0.0))
+                    iv_adj = float(parsed_metrics.get("iv_adj", 0.0))
+                    spot_shock = float(parsed_metrics.get("spot_shock", 0.0))
                     
                     logger.info(f"Ollama successfully parsed sentiment metrics for: '{headline}' -> sentiment={sentiment}")
                     return {
@@ -67,7 +58,7 @@ Example:
                         "spot_shock": spot_shock
                     }
                 except (json.JSONDecodeError, ValueError) as je:
-                    logger.warning(f"Ollama output was not valid JSON: '{text}'. Error: {je}")
+                    logger.warning(f"Ollama output was not valid JSON: '{raw_response}'. Error: {je}")
             else:
                 logger.warning(f"Ollama server returned status code {response.status_code}")
     except (httpx.ConnectError, httpx.TimeoutException) as ne:

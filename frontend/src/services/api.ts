@@ -293,4 +293,35 @@ export const agentsApi = {
   },
 };
 
+export const llmApi = {
+  listConfigs: async (token: string | null = null) => {
+    return apiRequest("/v1/models/configs", {}, token);
+  },
+  saveConfig: async (config: any, token: string | null = null) => {
+    return apiRequest("/v1/models/configs/save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(config),
+    }, token);
+  },
+  testConfig: async (testData: any, token: string | null = null) => {
+    return apiRequest("/v1/models/configs/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(testData),
+    }, token);
+  },
+  getAvailableOllamaModels: async (token: string | null = null) => {
+    return apiRequest("/v1/models/ollama/available", {}, token);
+  },
+};
+
+export const feedsApi = {
+  getRecentFeeds: async (token: string | null = null) => {
+    return apiRequest("/v1/feeds/recent", {}, token);
+  },
+};
+
+
+
 

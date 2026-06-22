@@ -200,3 +200,66 @@ def test_api_agents_debate_endpoint():
     assert "recommendations" in res_data
     assert "summary_report" in res_data
     assert res_data["summary_report"] is not None
+
+@pytest.mark.anyio
+async def test_langgraph_committee_feed_with_macro_events():
+    from app.services.agents import run_langgraph_committee_feed
+    
+    portfolio_state = {
+        "portfolio_summary": {
+            "net_liquidity": 10000.0,
+            "excess_liquidity": 8000.0,
+            "maintenance_margin": 2000.0,
+            "daily_pnl": 0.0
+        },
+        "compliance": {"status": "NOMINAL", "ratio": 0.20, "message": "Nominal"},
+        "value_at_risk": {"var_99_pct": 5.5},
+        "factor_exposure": {"portfolio_factors": {"growth": 0.5, "momentum": 0.5, "value": 0.5}},
+        "positions": [
+            {
+                "ticker": "PLTR",
+                "type": "OPTION_COMBINATION",
+                "size": 1,
+                "legs": [
+                    {"strike": 30.0, "type": "CALL", "expiration": "2026-06-05", "position_type": "SHORT", "delta": 0.40}
+                ]
+            }
+        ]
+    }
+    
+    macro_event = {
+        "headline": "Fed rate hike imminent",
+        "sentiment": -0.6,
+        "iv_adj": 5.0,
+        "spot_shock": -3.5
+    }
+    
+    active_macro_events = [
+        macro_event,
+        {
+            "headline": "Inflation CPI reports record high",
+            "sentiment": -0.8,
+            "iv_adj": 8.0,
+            "spot_shock": -5.0
+        }
+    ]
+    
+    res = await run_langgraph_committee_feed(portfolio_state, macro_event, active_macro_events)
+    
+    assert "debate_logs" in res
+    assert "advisory_report" in res
+    assert "recommendations" in res
+    assert "summary_report" in res
+    
+    opt_msg = next(log["message"] for log in res["debate_logs"] if log["agent"] == "Options Specialist Agent")
+    assert "PLTR" in opt_msg
+    assert "gamma" in opt_msg.lower()
+    
+    macro_msg = next(log["message"] for log in res["debate_logs"] if log["agent"] == "Macro Risk Agent")
+    assert "VaR" in macro_msg
+    assert "Growth" in macro_msg
+    
+    assert "CRITICAL RISK STATUS" in res["advisory_report"]
+    assert "Close out near-dated high-gamma options legs" in res["advisory_report"]
+    assert len(res["recommendations"]) > 0
+

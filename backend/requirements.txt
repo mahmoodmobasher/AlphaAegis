@@ -17,3 +17,7 @@ pandas>=2.2.0
 ibapi
 feedparser>=6.0.12
 httpx>=0.28.1
+langchain-core>=0.3.0
+langchain-openai
+langchain-ollama
+langchain>=1.3.10

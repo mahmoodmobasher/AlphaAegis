@@ -1,5 +1,13 @@
 import re
+import logging
 from typing import List, Dict, Any, Optional
+from app.agents.prompts import (
+    MACRO_RISK_AGENT_PROMPT,
+    OPTIONS_SPECIALIST_AGENT_PROMPT,
+    COORDINATOR_PROMPT
+)
+
+logger = logging.getLogger("uvicorn.error")
 
 def parse_natural_language_query(query_text: str) -> Dict[str, Any]:
     """
@@ -66,7 +74,7 @@ def parse_natural_language_query(query_text: str) -> Dict[str, Any]:
         "message": message
     }
 
-async def run_investment_committee(portfolio_state: Dict[str, Any]) -> Dict[str, Any]:
+async def run_investment_committee(portfolio_state: Dict[str, Any], active_macro_events: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
     """
     Executes a structured async graph simulating a dialectical debate between:
     1. Options Specialist Agent
@@ -75,6 +83,19 @@ async def run_investment_committee(portfolio_state: Dict[str, Any]) -> Dict[str,
     
     Produces detailed debate logs, a markdown advisory report, and staged recommendations.
     """
+    if active_macro_events is None:
+        active_macro_events = []
+        from app.main import redis_client
+        if redis_client:
+            try:
+                cached_items = await redis_client.lrange("macro:feed:cache", 0, 9)
+                for item in cached_items:
+                    try:
+                        active_macro_events.append(json.loads(item))
+                    except Exception:
+                        pass
+            except Exception as e:
+                logger.error(f"Failed to query macro feed cache for committee: {e}")
     positions = portfolio_state.get("positions", [])
     summary = portfolio_state.get("portfolio_summary", {})
     compliance = portfolio_state.get("compliance", {})
@@ -465,9 +486,10 @@ from app.services.risk_analytics import (
 )
 
 class AgentState:
-    def __init__(self, portfolio_state: Dict[str, Any], macro_event: Optional[Dict[str, Any]] = None):
+    def __init__(self, portfolio_state: Dict[str, Any], macro_event: Optional[Dict[str, Any]] = None, active_macro_events: Optional[List[Dict[str, Any]]] = None):
         self.portfolio_state = portfolio_state
         self.macro_event = macro_event
+        self.active_macro_events = active_macro_events or []
         self.macro_sentiment_score = 0.0
         self.headline = ""
         self.volatility_adjustment = 0.0
@@ -480,8 +502,8 @@ class AgentState:
 
 async def macro_risk_agent_node(state: AgentState):
     """
-    Macro Risk Agent: Ingests raw text feed, updates sentiment, and establishes
-    localized volatility adjustment parameters (+/- IV expansion due to headline).
+    Macro Risk Agent: Ingests raw text feed, updates sentiment, and maps
+    macro catalyst (sentiment, spot shock) to 99% VaR and factor exposures.
     """
     event = state.macro_event or {}
     state.headline = event.get("headline", "No active news stream.")
@@ -494,20 +516,37 @@ async def macro_risk_agent_node(state: AgentState):
         sentiment_desc = "Bullish / Risk-On"
     elif state.macro_sentiment_score < -0.3:
         sentiment_desc = "Bearish / Risk-Off"
-        
+
+    # Evaluate active macro events context
+    macro_summaries = []
+    for ev in state.active_macro_events[:3]:
+        h = ev.get("headline") or ev.get("title") or "Unknown"
+        s = ev.get("sentiment", 0.0)
+        p = ev.get("spot_shock", 0.0)
+        macro_summaries.append(f"'{h}' (Sentiment: {s:+.2f}, Spot: {p:+.1f}%)")
+    macro_context = "; ".join(macro_summaries) if macro_summaries else "No active macro events cached."
+
+    # Factor exposure and VaR mappings
+    factor_exposure = state.portfolio_state.get("factor_exposure", {})
+    portfolio_factors = factor_exposure.get("portfolio_factors", {})
+    growth = portfolio_factors.get("growth", 0.0)
+    momentum = portfolio_factors.get("momentum", 0.0)
+    var_99_pct = state.portfolio_state.get("value_at_risk", {}).get("var_99_pct", 0.0)
+    
     state.debate_logs.append({
         "agent": "Macro Risk Agent",
         "avatar": "activity",
-        "message": f"Macro Shock Alert! Detected headline: '{state.headline}' (Sentiment: {sentiment_desc}, score: {state.macro_sentiment_score}). "
-                   f"Adjusting volatility premium parameters: Expecting a {state.volatility_adjustment:+.1f}% IV shift and a {state.spot_shock_pct:+.1f}% index spot shock."
+        "message": f"Evaluating active macro events buffer: {macro_context}. "
+                   f"Mapping catalyst sentiment ({state.macro_sentiment_score:+.2f}) and spot shock ({state.spot_shock_pct:+.1f}%) "
+                   f"to portfolio 99% VaR ({var_99_pct:.2f}%) and factor exposures (Growth: {growth:.2f}, Momentum: {momentum:.2f}). "
+                   f"High volatility alerts require restructuring capital buffers and evaluating structural tail risk."
     })
 
 async def options_specialist_agent_node(state: AgentState):
     """
-    Options Specialist Agent: Intercepts Macro parameters, triggers CRR Binomial Lattice engine
-    to simulate asset shock across activePositions, and updates Value-at-Risk (VaR).
+    Options Specialist Agent: Evaluates Greek and pricing engine changes, focusing
+    on how volatility shocks compress/expand gamma risk on near-dated short option legs.
     """
-    # Trigger pricing.py calculations via execute_agent_portfolio_calculations
     risk_results = execute_agent_portfolio_calculations(
         state.portfolio_state,
         state.spot_shock_pct,
@@ -516,38 +555,59 @@ async def options_specialist_agent_node(state: AgentState):
     state.risk_data = risk_results
     
     sim_var = risk_results.get("value_at_risk", {}).get("var_99_pct", 0.0)
+    
+    # Calculate average IV adjustments from recent events
+    iv_shifts = [ev.get("iv_adj", 0.0) for ev in state.active_macro_events[:3]]
+    avg_iv_adj = sum(iv_shifts) / len(iv_shifts) if iv_shifts else state.volatility_adjustment
+
+    # Check for short options or specifically PLTR calls (near-dated high-gamma legs)
+    has_pltr = any(pos.get("ticker", "").upper() == "PLTR" for pos in state.portfolio_state.get("positions", []))
+    target_leg_comment = " Specifically, near-dated PLTR short option legs are highly vulnerable to gamma risk acceleration." if has_pltr else " Short options expiring under 14 days face severe gamma expansion risk."
+
     state.debate_logs.append({
         "agent": "Options Specialist Agent",
         "avatar": "shield",
-        "message": f"Processed pro-forma risk updates under macro shock. Simulated 99% portfolio VaR has adjusted to {sim_var:.2f}% of Net Liquidation. "
-                   f"Calculating American option payoff adjustments across all legs using the CRR Binomial Lattice engine."
+        "message": f"Analyzing Greeks under volatility shift of {avg_iv_adj:+.1f}%. "
+                   f"Simulated portfolio 99% VaR has adjusted to {sim_var:.2f}% of net liquidation. "
+                   f"Expanding implied volatility will compress extrinsic values and accelerate gamma risk on near-dated short options.{target_leg_comment} "
+                   f"Recommending rolling or closing out near-dated high-gamma option legs immediately."
     })
 
 async def pm_coordinator_node(state: AgentState):
     """
-    PM Coordinator: Bundles the risk stats, debate logs, and generates a live markdown reasoning brief.
+    PM Coordinator: Synthesizes risk metrics, maps catalyst to risk status change,
+    and issues definitive trade recommendations in the Investment Committee Advisory Report.
     """
     summary = state.risk_data.get("portfolio_summary", {})
     net_liq = summary.get("net_liquidity", 5000.0)
     maint_margin = summary.get("maintenance_margin", 3000.0)
     daily_pnl = summary.get("daily_pnl", 0.0)
     var_99_pct = state.risk_data.get("value_at_risk", {}).get("var_99_pct", 0.0)
-    
+    margin_ratio = maint_margin / net_liq if net_liq > 0 else 0.0
+
+    # 1. Map Macro Catalyst to a Clear Risk Status Change
+    risk_status = "NOMINAL RISK STATUS"
+    if margin_ratio > 0.80 or net_liq < 0 or var_99_pct > 15.0 or state.macro_sentiment_score < -0.5:
+        risk_status = "CRITICAL RISK STATUS"
+    elif margin_ratio > 0.60 or var_99_pct > 10.0 or state.macro_sentiment_score < -0.2:
+        risk_status = "WARNING RISK STATUS"
+
     state.debate_logs.append({
         "agent": "Portfolio Manager Agent",
         "avatar": "briefcase",
-        "message": f"Consensus reached. Macro sentiment score of {state.macro_sentiment_score:+.2f} absorbed. "
-                   f"All client-side displays are synced with the updated Greeks and risk analytics brief."
+        "message": f"Committee consensus locked. Determined portfolio risk state is '{risk_status}'. "
+                   f"To mitigate tail risk and stabilize capital requirements, we must link our macro updates to immediate trade action."
     })
-    
-    # Stage defensive/offensive recommendation based on sentiment
-    if state.macro_sentiment_score < -0.3:
+
+    # 2. Generate at least one definitive, executable trade recommendation
+    if risk_status == "CRITICAL RISK STATUS" or state.macro_sentiment_score < -0.3:
+        # Long protective index hedge
         state.recommendations.append({
             "id": "rec_macro_hedge",
             "ticker": "SPY",
             "type": "OPTION_COMBINATION",
             "action": "HEDGE",
-            "description": f"Stage a long protective SPY Put to hedge downside from hawkish macro news: '{state.headline}'",
+            "description": "Deploy a protective index hedge: Stage a long protective SPY Put option spread to contain systemic tail-risk.",
             "trade_draft": {
                 "ticker": "SPY",
                 "type": "OPTION_COMBINATION",
@@ -558,13 +618,31 @@ async def pm_coordinator_node(state: AgentState):
                 ]
             }
         })
+        # Close out high gamma option legs
+        state.recommendations.append({
+            "id": "rec_close_gamma",
+            "ticker": "PLTR",
+            "type": "OPTION_COMBINATION",
+            "action": "CLOSE",
+            "description": "Close out near-dated high-gamma options legs: Buy back short option contracts with DTE <= 14 to eliminate assignment risk.",
+            "trade_draft": {
+                "ticker": "PLTR",
+                "type": "OPTION_COMBINATION",
+                "action": "BUY",
+                "size": 1,
+                "legs": [
+                    {"strike": 30.0, "type": "CALL", "expiration": "2026-07-17", "position_type": "LONG", "delta": 0.50}
+                ]
+            }
+        })
     else:
+        # Default deploy recommendation or close options
         state.recommendations.append({
             "id": "rec_macro_deploy",
             "ticker": "SPY",
             "type": "EQUITY",
             "action": "BUY",
-            "description": f"Deploy excess capital to capture positive sentiment from news: '{state.headline}'",
+            "description": "Optimize capital efficiency: Buy 5 shares of SPY baseline index to capture positive risk-on momentum.",
             "trade_draft": {
                 "ticker": "SPY",
                 "type": "EQUITY",
@@ -574,27 +652,34 @@ async def pm_coordinator_node(state: AgentState):
             }
         })
 
-    state.advisory_report = f"""# Macro Shock Committee Advisory Report
+    # Actionable Report Construction
+    recs_bullets = "\n".join([f"- **{r['action']}**: {r['description']}" for r in state.recommendations])
+    
+    state.advisory_report = f"""# Investment Committee Advisory Report
 
-## News Ingestion Brief
-* **Headline:** "{state.headline}"
-* **Sentiment Impact:** {state.macro_sentiment_score:+.2f} ({'Bearish' if state.macro_sentiment_score < -0.2 else 'Bullish' if state.macro_sentiment_score > 0.2 else 'Neutral'})
-* **Volatility Shock Adjusted:** {state.volatility_adjustment:+.1f}% IV Shift
-* **Spot Index Shock Adjusted:** {state.spot_shock_pct:+.1f}% Spot Shift
+## News Ingestion & Risk Briefing
+* **Headline Catalyst:** "{state.headline}"
+* **Committee Risk Assessment:** {risk_status}
+* **Sentiment Metrics:** {state.macro_sentiment_score:+.2f} ({'Risk-Off Bearish' if state.macro_sentiment_score < -0.2 else 'Risk-On Bullish' if state.macro_sentiment_score > 0.2 else 'Neutral'})
+* **Implied Volatility Shift:** {state.volatility_adjustment:+.1f}% IV Shock
+* **Spot Price Shock Scenario:** {state.spot_shock_pct:+.1f}% Spot Shock
 
-## Multi-Agent Risk Assessments
+## Specialist Domain Summaries
 
-### 1. Macro Risk Agent
-- Flagged expectable shift in systemic volatility. Expecting localized beta shock.
+### 1. Macro Risk Specialist
+- Mapped active macro catalyst to portfolio factor concentrations. 
+- Flagged portfolio 99% VaR shift to {var_99_pct:.2f}% of net liquidation.
 
-### 2. Options Specialist Agent
-- Re-priced option inventory using **CRR Binomial Lattice Model**.
-- Simulated Value-at-Risk (99% confidence): **{var_99_pct:.2f}%** of Net Liquidity.
+### 2. Options Specialist
+- Re-priced option chain and modeled gamma risk compression.
+- Recommended immediate de-risking of near-dated high-gamma short legs.
 
 ---
 
-### Actionable Advisory Response
-{state.recommendations[0]['description'] if state.recommendations else 'Maintain current cash deployment and options legs.'}
+## Actionable Trade Recommendations
+To align our capital structures with these macro updates, we recommend executing the following adjustments in the Sandbox:
+
+{recs_bullets}
 """
 
     state.summary_report = f"""# Macro Sentiment Risk Commentary
@@ -605,10 +690,10 @@ async def pm_coordinator_node(state: AgentState):
 - **Maintenance Margin (Shocked)**: ${maint_margin:,.2f}
 - **Simulated Daily P&L Shift**: ${daily_pnl:,.2f}
 
-### Systemic Volatility Assessment
-- The sentiment vector is **{state.macro_sentiment_score:+.2f}**. 
-- Simulated 99% portfolio VaR is **{var_99_pct:.2f}%** of Net Liquidation.
-- Protective adjustments are recommended to mitigate tail risks under high volatility prints.
+### Volatility Risk Assessment
+- Active macro sentiment index is {state.macro_sentiment_score:+.2f}. 
+- Simulated 99% portfolio VaR is {var_99_pct:.2f}% of Net Liquidation.
+- Defensively manage near-dated options and high-beta momentum equities to safeguard compliance buffers.
 """
 
 def execute_agent_portfolio_calculations(portfolio_state: dict, spot_shock_pct: float, iv_shock_pct: float) -> dict:
@@ -771,8 +856,8 @@ def execute_agent_portfolio_calculations(portfolio_state: dict, spot_shock_pct: 
         logger.error(f"Failed execute_agent_portfolio_calculations: {e}")
         return {"error": str(e)}
 
-async def run_langgraph_committee_feed(portfolio_state: Dict[str, Any], macro_event: Dict[str, Any]) -> Dict[str, Any]:
-    state = AgentState(portfolio_state, macro_event)
+async def run_langgraph_committee_feed(portfolio_state: Dict[str, Any], macro_event: Dict[str, Any], active_macro_events: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    state = AgentState(portfolio_state, macro_event, active_macro_events)
     
     # 1. Macro Risk Agent Node
     await macro_risk_agent_node(state)

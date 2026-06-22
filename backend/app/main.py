@@ -14,6 +14,11 @@ from app.database import engine, Base, SessionLocal
 from app.models import User, Strategy, StrategyLeg, PortfolioPosition, PortfolioLeg, Watchlist, TradeNote # Import models to register with Base
 from app.routers import auth, strategy, chain, portfolio, ib, ib_config, risk_analytics, agents  # ib routers enabled
 from app.routers.portfolio import get_user_portfolio
+from app.api.v1.models import router as models_router
+from app.api.v1.feeds import router as feeds_router
+from app.models.llm_config import LLMProviderConfig
+from app.services.llm_router import get_dynamic_model
+MOCK_MODE = True
 
 from app.services.risk_analytics import (
     parse_positions,
@@ -54,6 +59,9 @@ app.include_router(ib.router, prefix="/api")
 app.include_router(ib_config.router, prefix="/api")
 app.include_router(risk_analytics.router, prefix="/api")
 app.include_router(agents.router, prefix="/api")
+app.include_router(models_router)
+app.include_router(feeds_router)
+
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -113,18 +121,89 @@ async def redis_message_listener():
                 try:
                     payload = json.loads(data_str)
                     if channel == "macro:feed:raw":
-                        # 1. Intercept macro:feed:raw news feed and analyze using local Ollama instance
+                        # 1. Intercept macro:feed:raw news feed and analyze using active LLM configuration
                         headline = payload.get("headline") or payload.get("text", "")
-                        from app.services.ollama_client import analyze_sentiment_with_ollama
-                        ollama_metrics = await analyze_sentiment_with_ollama(headline)
                         
-                        # Merge the parsed LLM metrics back into our payload
-                        payload["sentiment"] = ollama_metrics["sentiment"]
+                        # Query active model profile from the database cache
+                        db = SessionLocal()
+                        provider_id = "ollama"
+                        model_name = "mistral:latest"
+                        try:
+                            config = db.query(LLMProviderConfig).filter(LLMProviderConfig.is_active == True).first()
+                            if not config:
+                                config = db.query(LLMProviderConfig).first()
+                            if config:
+                                provider_id = config.provider_id
+                                model_name = config.default_model
+                        except Exception as dbe:
+                            logger.error(f"Error querying active LLM config from DB: {dbe}")
+                        finally:
+                            db.close()
+
+                        # Retrieve dynamic model connection object on the fly
+                        llm_metrics = {"sentiment": 0.0, "iv_adj": 0.0, "spot_shock": 0.0}
+                        llm = None
+                        try:
+                            llm = await get_dynamic_model(provider_id=provider_id, model_name=model_name, temperature=0.1)
+                        except Exception as e:
+                            logger.error(f"Failed to load dynamic model {provider_id}/{model_name}: {e}. Trying fallback.")
+
+                        if MOCK_MODE:
+                            # Zero-cost mock metrics to avoid LLM credit usage
+                            llm_metrics = {
+                                "sentiment": 0.0,
+                                "iv_adj": 0.0,
+                                "spot_shock": 0.0,
+                                "risk_rationale": "DEBUG MOCK LAYER ACTIVE - ZERO TOKENS USED."
+                            }
+                            logger.info("MOCK_MODE active: using static LLM metrics.")
+                        else:
+                            if llm:
+                                prompt = f"""You are a financial options risk analysis agent.
+Analyze the following macroeconomic news headline: "{headline}"
+Evaluate its sentiment and risk parameters.
+Output exactly a strict, unformatted JSON dictionary containing exactly these keys:
+- "sentiment": A float between -1.0 (extreme bearish/panic) and +1.0 (extreme bullish/risk-on)
+- "iv_adj": Volatility percentage shift as a float (e.g. 0.025 for +2.5% premium pump, -0.012 for -1.2% dump)
+- "spot_shock": Price movement percentage shift as a float (e.g. -0.018 for -1.8% drop, 0.015 for +1.5% rally)
+
+Return ONLY the raw JSON structure. No markdown blocks, no wrapping, no headers.
+Example:
+{{"sentiment": 0.4, "iv_adj": -0.01, "spot_shock": 0.015}}
+"""
+                                try:
+                                    response = await llm.ainvoke(prompt)
+                                    text_response = getattr(response, "content", str(response)).strip()
+                                    
+                                    # Strip away markdown code fences if present
+                                    if text_response.startswith("```json"):
+                                        text_response = text_response.split("```json")[1].split("```")[0].strip()
+                                    elif text_response.startswith("```"):
+                                        text_response = text_response.split("```")[1].split("```")[0].strip()
+                                    
+                                    parsed = json.loads(text_response)
+                                    llm_metrics["sentiment"] = float(parsed.get("sentiment", 0.0))
+                                    llm_metrics["iv_adj"] = float(parsed.get("iv_adj", 0.0))
+                                    llm_metrics["spot_shock"] = float(parsed.get("spot_shock", 0.0))
+                                    logger.info(f"Successfully evaluated dynamic LLM ({provider_id}/{model_name}) metrics: {llm_metrics}")
+                                except Exception as le:
+                                    logger.warning(f"Error evaluating dynamic LLM sentiment: {le}. Falling back to default Ollama client.")
+                                    llm = None  # trigger fallback
+                            if not llm:
+                                # Fallback logic to Ollama directly if dynamic LLM fails
+                                try:
+                                    from app.services.ollama_client import analyze_sentiment_with_ollama
+                                    llm_metrics = await analyze_sentiment_with_ollama(headline)
+                                except Exception as fe:
+                                    logger.error(f"Failed default Ollama fallback: {fe}")
                         
-                        iv_adj_val = ollama_metrics["iv_adj"]
-                        spot_shock_val = ollama_metrics["spot_shock"]
+                        # Merge LLM metrics into payload
+                        payload["sentiment"] = llm_metrics["sentiment"]
                         
-                        # Convert fractional percentages (e.g. 0.025 to 2.5) for backend pricing engine calculations if needed
+                        iv_adj_val = llm_metrics["iv_adj"]
+                        spot_shock_val = llm_metrics["spot_shock"]
+                        
+                        # Convert fractional percentages to absolute percentages for backend (e.g. 0.025 to 2.5)
                         if -1.0 < iv_adj_val < 1.0 and iv_adj_val != 0.0:
                             iv_adj_val *= 100.0
                         if -1.0 < spot_shock_val < 1.0 and spot_shock_val != 0.0:
@@ -133,8 +212,13 @@ async def redis_message_listener():
                         payload["iv_adj"] = iv_adj_val
                         payload["spot_shock"] = spot_shock_val
                         
-                        # Publish final enriched payload onto our active 'alphaaegis-macro-events' Redis channel
+                        # Publish enriched payload onto alphaaegis-macro-events Redis channel
                         if redis_client:
+                            try:
+                                await redis_client.lpush("macro:feed:cache", json.dumps(payload))
+                                await redis_client.ltrim("macro:feed:cache", 0, 49)
+                            except Exception as re:
+                                logger.error(f"Error caching headline in Redis: {re}")
                             await redis_client.publish("alphaaegis-macro-events", json.dumps(payload))
                             
                     elif channel == "alphaaegis-macro-events":
@@ -165,8 +249,20 @@ async def redis_message_listener():
                         finally:
                             db.close()
                             
+                        active_macro_events = []
+                        if redis_client:
+                            try:
+                                cached_items = await redis_client.lrange("macro:feed:cache", 0, 9)
+                                for item in cached_items:
+                                    try:
+                                        active_macro_events.append(json.loads(item))
+                                    except Exception:
+                                        pass
+                            except Exception as re_err:
+                                logger.error(f"Error querying macro cache in main listener: {re_err}")
+
                         from app.services.agents import run_langgraph_committee_feed
-                        analytics_res = await run_langgraph_committee_feed(portfolio_state, payload)
+                        analytics_res = await run_langgraph_committee_feed(portfolio_state, payload, active_macro_events)
                         await manager.broadcast(json.dumps(analytics_res))
                     else:
                         analytics_res = run_calculations(payload)

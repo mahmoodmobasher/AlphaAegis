@@ -6,7 +6,8 @@ import {
   ShieldAlert, 
   LogIn, 
   LogOut, 
-  ChevronDown 
+  ChevronDown,
+  Radio
 } from "lucide-react";
 import { Settings } from "lucide-react";
 
@@ -73,6 +74,15 @@ export default function Navbar() {
             >
               Portfolio
             </button>
+            {mounted && store.isAuthenticated && (
+              <button 
+                onClick={() => router.push("/dashboard/rss-feed")} 
+                className={`flex items-center gap-1.5 hover:text-white transition ${pathname === "/dashboard/rss-feed" ? "text-white animate-pulse-subtle" : ""}`}
+              >
+                <Radio className="h-4 w-4 text-emerald-400 animate-pulse" />
+                <span>Live RSS Feed</span>
+              </button>
+            )}
             {mounted && store.isAuthenticated && (
               <button
                 onClick={() => router.push('/settings')}
