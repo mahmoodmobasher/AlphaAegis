@@ -53,3 +53,8 @@ graph TD
 ### 4. Client State Consumption (Zustand)
 - **Centralized Store:** The store at [usePortfolioStore.ts](file:///Users/moemahmood/builder_code/myoption/frontend/src/store/usePortfolioStore.ts) catches the event and caches the new calculations.
 - **UI Reactivity Boundary:** Key components like the Live News marquee banner, Greek dashboard metrics, and Markdown narrative blocks read from selective slices of the store, allowing sub-components to update at 60 FPS without triggering parent component redraws.
+
+### 5. On-Demand AI Risk & Performance Commentary
+- **Manual Trigger:** Clicking the portfolio 'Generate AI Commentary' button sends a WebSocket payload containing `portfolio_summary` and `aggregated_greeks` to `/ws/portfolio-analytics`.
+- **Calculations Pipeline:** The backend processes the metrics asynchronously in `run_calculations`, querying the active LLM configuration profile and generating dynamic, institutional-grade Markdown commentary using local Ollama (Llama3/Mistral) or dynamic cloud models.
+- **Cross-Wire Insulation:** The background committee feed updates (`run_langgraph_committee_feed`) are insulated from the portfolio Greeks commentary box by removing duplicate mapping, guaranteeing that manual analyses are never overridden by automated news sentiment summaries.

@@ -44,7 +44,8 @@ Directly integrated into the portfolio dashboard, this engine provides automated
   * **Theta Capture:** Details time-decay harvesting versus premium decay drag.
   * **Vega Profile:** Classifies the portfolio as net buyer/seller of volatility and warns about volatility spikes.
   * **Strategy Summary:** Confirms if the portfolio is successfully capturing premium via short options (e.g., active TQQQ spreads) while maintaining controlled directional exposure.
-* This logic is defined in [generate_greeks_commentary](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py#L716-L791) in [risk_analytics.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/risk_analytics.py).
+* **Dynamic Generation:** Integrates dynamic LLM / local Ollama model loops (`get_dynamic_model` and `llm.ainvoke`), falling back to a direct local Ollama HTTP completion channel on `http://localhost:11434/api/generate` if the configuration profile is offline.
+* **On-Demand Trigger:** Clicking the "Generate AI Commentary" button manually streams client-sent `aggregated_greeks` and `portfolio_summary` over `/ws/portfolio-analytics` to output professional risk analyses directly in the UI. Background macro feed events are insulated to prevent layout commentary cross-wire overrides.
 
 ### 4. Multi-Agent AI Investment Committee Room & Real-Time Macro Sentiment Feed
 * **Live RSS Financial Wire Aggregator:** Aggregates live macroeconomic news headlines concurrently from Yahoo Finance, CNBC, and MarketWatch using [macro_stream.py](file:///Users/moemahmood/builder_code/myoption/backend/app/services/macro_stream.py) every 60 seconds. Enforces in-memory title deduplication and utilizes keyword-based sentiment extraction to dynamically trigger portfolio spot/volatility stress tests. Formatted payloads are emitted to Redis under `"alphaaegis-macro-events"` and `"macro:feed:raw"` channels.
