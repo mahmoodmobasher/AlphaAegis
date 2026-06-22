@@ -881,7 +881,6 @@ async def run_langgraph_committee_feed(portfolio_state: Dict[str, Any], macro_ev
         "advisory_report": state.advisory_report,
         "summary_report": state.summary_report,
         "recommendations": state.recommendations,
-        "greeks_commentary": state.summary_report,
         "macro_headline": state.headline,
         "macro_sentiment_score": state.macro_sentiment_score
     }
