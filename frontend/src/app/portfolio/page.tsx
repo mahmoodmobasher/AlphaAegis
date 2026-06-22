@@ -277,6 +277,7 @@ export default function PortfolioPage() {
   const [showCustomJsonInput, setShowCustomJsonInput] = useState(false);
   const [customJsonActive, setCustomJsonActive] = useState(false);
   const [riskTab, setRiskTab] = useState<"factors" | "beta_delta" | "stress" | "committee">("factors");
+  const [triggerAnalysis, setTriggerAnalysis] = useState(false);
   const [macroHeadline, setMacroHeadline] = useState<string | null>(null);
   const [macroSentimentScore, setMacroSentimentScore] = useState<number | null>(null);
 
@@ -305,6 +306,7 @@ export default function PortfolioPage() {
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
+    if (!triggerAnalysis) return;
     // Ensure the user is authenticated before establishing a connection
     if (!store.token || !store.isAuthenticated) return;
 
@@ -395,6 +397,7 @@ export default function PortfolioPage() {
           };
         }
         ws.send(JSON.stringify(payload));
+        setTriggerAnalysis(false);
       }
     };
 
@@ -449,7 +452,7 @@ export default function PortfolioPage() {
     return () => {
       clearTimeout(timer);
     };
-  }, [activePositions, spotPrice, volatility, portfolioData, ibPortfolioData, viewMode, store.isAuthenticated, customJsonActive, customJson]);
+  }, [triggerAnalysis, store.isAuthenticated]);
 
   // Cleanup WebSocket on component unmount
   useEffect(() => {
@@ -1802,12 +1805,22 @@ export default function PortfolioPage() {
                   )}
 
                   {/* AI Risk & Performance Commentary Panel */}
-                  {aiCommentary && (
-                    <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl shadow-md space-y-3">
-                      <h3 className="text-xs font-bold text-text-main flex items-center gap-1.5 border-b border-slate-900 pb-2">
+                  <div className="bg-slate-950 border border-slate-900 p-4 rounded-2xl shadow-md space-y-3">
+                    <div className="flex justify-between items-center border-b border-slate-900 pb-2">
+                      <h3 className="text-xs font-bold text-text-main flex items-center gap-1.5">
                         <Sparkles className="h-4 w-4 text-indigo-400" />
                         AI Risk & Performance Commentary
                       </h3>
+                      <button
+                        onClick={() => setTriggerAnalysis(true)}
+                        disabled={riskLoading}
+                        className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-bold text-[10px] rounded-xl shadow-md transition duration-150 flex items-center gap-1.5 uppercase tracking-wider"
+                      >
+                        <Sparkles className={`h-3.5 w-3.5 ${riskLoading ? "animate-spin" : ""}`} />
+                        {riskLoading ? "Analyzing Metrics..." : "Generate AI Commentary"}
+                      </button>
+                    </div>
+                    {aiCommentary ? (
                       <div className="text-text-sub text-xs leading-relaxed max-h-[300px] overflow-y-auto pr-1">
                         {aiCommentary.split("\n").map((line: string, idx: number) => {
                           if (line.startsWith("# ")) {
@@ -1826,8 +1839,10 @@ export default function PortfolioPage() {
                           return null;
                         })}
                       </div>
-                    </div>
-                  )}
+                    ) : (
+                      <p className="text-[11px] font-medium text-text-muted italic py-4">Click "Generate AI Commentary" to trigger real-time quantitative portfolio analysis.</p>
+                    )}
+                  </div>
 
                   {/* Positions List */}
                   <div className="bg-bg-panel border border-border-panel p-5 rounded-2xl shadow-xl flex-1 flex flex-col gap-4">
